@@ -4,6 +4,32 @@
 - The OpenAPI 3.1 spec at `api/openapi.yaml` is the single source of truth — see `.kiro/steering/openapi.md` for location rationale, generation tooling, and workflow rules
 - Never modify generated files by hand
 
+## Input Validation
+All request bodies and query parameters are validated against the OpenAPI schema **before** they reach the application layer. Validation is enforced at the HTTP handler boundary using the generated types from `oapi-codegen`.
+
+### Rules encoded in the spec
+- `required` fields must be present — missing required fields return `400`
+- `minLength` / `maxLength` on all string fields — prevents empty strings and oversized payloads
+- `pattern` on machine-identifier fields (`code` on Option, OptionValue; `sku` on Variant; `locale`, `currency`) — enforces format without ambiguity
+- `minimum` on numeric fields (`price`, `sort_order`) — price must be > 0; sort_order >= 0
+- `minItems` on required arrays (`variants`, `translations`, option `values`) — already in spec; enforced at handler
+- `format: uri` on asset URLs — validated by the JSON schema `uri` format checker
+- `format: uuid` on all ID fields
+
+### What validation does NOT cover
+Schema validation catches structural and format errors (`400 Bad Request`). Domain invariant violations — e.g. a variant referencing an option value code not declared in `options` — are caught by `Product.Validate()` in the domain layer and returned as `422 Unprocessable Entity`.
+
+### Error response
+Validation failures return `400 Bad Request` with the standard error shape:
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "variants[0].sku: does not match pattern '^[A-Z0-9][A-Z0-9-]{1,63}$'"
+  }
+}
+```
+
 ## Command Query Separation (CQS)
 See `.kiro/steering/cqs.md` for the full principle, layer-by-layer rules, and rationale.
 

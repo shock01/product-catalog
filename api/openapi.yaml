@@ -222,25 +222,35 @@ components:
         locale:
           type: string
           description: BCP-47 locale code (e.g. `en-GB`, `de-DE`).
+          pattern: '^[a-z]{2}-[A-Z]{2}$'
           example: en-GB
         title:
           type: string
+          minLength: 1
+          maxLength: 255
           example: Classic T-Shirt
         slug:
           type: string
           description: URL-safe localised slug. Must be unique per locale.
+          minLength: 1
+          maxLength: 255
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
           example: classic-t-shirt
         description:
           type: string
+          maxLength: 65535
           example: A timeless wardrobe staple.
         short_description:
           type: string
+          maxLength: 500
           example: Everyday comfort.
         meta_title:
           type: string
+          maxLength: 255
           example: Classic T-Shirt | MyStore
         meta_description:
           type: string
+          maxLength: 500
           example: Shop the Classic T-Shirt in multiple colours and sizes.
 
     VariantTranslation:
@@ -249,12 +259,16 @@ components:
       properties:
         locale:
           type: string
+          pattern: '^[a-z]{2}-[A-Z]{2}$'
           example: en-GB
         title:
           type: string
+          minLength: 1
+          maxLength: 255
           example: Classic T-Shirt — S / Red
         description:
           type: string
+          maxLength: 65535
 
     OptionTranslation:
       type: object
@@ -262,10 +276,13 @@ components:
       properties:
         locale:
           type: string
+          pattern: '^[a-z]{2}-[A-Z]{2}$'
           example: en-GB
         name:
           type: string
           description: Human-readable option name for this locale.
+          minLength: 1
+          maxLength: 100
           example: Size
 
     OptionValueTranslation:
@@ -274,10 +291,13 @@ components:
       properties:
         locale:
           type: string
+          pattern: '^[a-z]{2}-[A-Z]{2}$'
           example: en-GB
         value:
           type: string
           description: Human-readable option value label for this locale.
+          minLength: 1
+          maxLength: 100
           example: Extra Large
 
     # -- Options -------------------------------------------------------------
@@ -372,10 +392,12 @@ components:
         price_override:
           type: number
           format: decimal
+          minimum: 0.01
           description: Overrides the variant base price for this channel. Omit to use base price.
         currency:
           type: string
           description: ISO 4217 currency code. Required when price_override is set.
+          pattern: '^[A-Z]{3}$'
           example: GBP
 
     MarketplaceListing:
@@ -589,9 +611,14 @@ components:
       properties:
         code:
           type: string
+          description: Locale-neutral machine identifier. Lowercase letters, digits, and hyphens only.
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
           example: size
         sort_order:
           type: integer
+          minimum: 0
         translations:
           type: array
           minItems: 1
@@ -600,6 +627,7 @@ components:
         values:
           type: array
           minItems: 1
+          maxItems: 100
           items:
             $ref: '#/components/schemas/OptionValueInput'
 
@@ -609,9 +637,14 @@ components:
       properties:
         code:
           type: string
+          description: Locale-neutral machine identifier. Lowercase letters, digits, and hyphens only.
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
           example: xl
         sort_order:
           type: integer
+          minimum: 0
         translations:
           type: array
           minItems: 1
@@ -624,13 +657,20 @@ components:
       properties:
         sku:
           type: string
+          description: Unique identifier of this purchasable unit. Uppercase letters, digits, and hyphens only.
+          minLength: 2
+          maxLength: 64
+          pattern: '^[A-Z0-9][A-Z0-9-]{1,63}$'
           example: TSHIRT-S-RED
         price:
           type: number
           format: decimal
+          minimum: 0.01
           example: 19.99
         currency:
           type: string
+          description: ISO 4217 currency code.
+          pattern: '^[A-Z]{3}$'
           example: GBP
         option_value_codes:
           type: array
@@ -639,8 +679,12 @@ components:
             (e.g. `["s", "red"]`). Must reference codes declared in `options`.
           items:
             type: string
+            minLength: 1
+            maxLength: 64
+            pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
         assets:
           type: array
+          maxItems: 50
           items:
             $ref: '#/components/schemas/AssetInput'
         translations:
@@ -656,6 +700,7 @@ components:
         url:
           type: string
           format: uri
+          maxLength: 2048
         type:
           $ref: '#/components/schemas/AssetType'
         scope:
@@ -663,8 +708,12 @@ components:
         variant_sku:
           type: string
           description: Required when scope is `variant`. References a variant in the same request by SKU.
+          minLength: 2
+          maxLength: 64
+          pattern: '^[A-Z0-9][A-Z0-9-]{1,63}$'
         sort_order:
           type: integer
+          minimum: 0
 
     # -- Search result -------------------------------------------------------
 
