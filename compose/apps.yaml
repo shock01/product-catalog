@@ -1,0 +1,64 @@
+# Application services — included by compose.yaml
+# Do not run this file directly.
+
+services:
+
+  api:
+    build:
+      context: ..
+      dockerfile: cmd/api/Dockerfile
+    environment:
+      PORT:                    "8080"
+      DATABASE_URL:            "postgres://catalog:catalog@postgres:5432/catalog?sslmode=disable"
+      VALKEY_ADDR:             "valkey:6379"
+      OPENSEARCH_URL:          "http://opensearch:9200"
+      SQS_QUEUE_URL:           "http://localstack:4566/000000000000/product-catalog-local-events"
+      EVENTBRIDGE_BUS:         "product-catalog"
+      AWS_ENDPOINT_URL:        "http://localstack:4566"
+      AWS_ACCESS_KEY_ID:       "test"
+      AWS_SECRET_ACCESS_KEY:   "test"
+      AWS_DEFAULT_REGION:      "eu-west-1"
+      CACHE_TTL_SECONDS:       "300"
+      BLOOM_REFRESH_SECONDS:   "300"
+      LOG_LEVEL:               "info"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_SERVICE_NAME:       "product-catalog-api"
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  indexer:
+    build:
+      context: ..
+      dockerfile: cmd/indexer/Dockerfile
+    environment:
+      DATABASE_URL:            "postgres://catalog:catalog@postgres:5432/catalog?sslmode=disable"
+      OPENSEARCH_URL:          "http://opensearch:9200"
+      SQS_QUEUE_URL:           "http://localstack:4566/000000000000/product-catalog-local-indexer"
+      AWS_ENDPOINT_URL:        "http://localstack:4566"
+      AWS_ACCESS_KEY_ID:       "test"
+      AWS_SECRET_ACCESS_KEY:   "test"
+      AWS_DEFAULT_REGION:      "eu-west-1"
+      LOG_LEVEL:               "info"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_SERVICE_NAME:       "product-catalog-indexer"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      opensearch:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy

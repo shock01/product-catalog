@@ -1,0 +1,109 @@
+# Infrastructure services — included by compose.yaml
+# Do not run this file directly.
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB:       catalog
+      POSTGRES_USER:     catalog
+      POSTGRES_PASSWORD: catalog
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catalog -d catalog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  opensearch:
+    image: opensearchproject/opensearch:2
+    environment:
+      discovery.type:              single-node
+      DISABLE_SECURITY_PLUGIN:     "true"
+      OPENSEARCH_JAVA_OPTS:        "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qv '\"status\":\"red\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  localstack:
+    image: localstack/localstack:3
+    environment:
+      SERVICES:        sqs,events
+      DEFAULT_REGION:  eu-west-1
+      LOCALSTACK_HOST: localstack
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"sqs\": \"running\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.99.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./compose/otel-collector.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    depends_on:
+      jaeger:
+        condition: service_started
+      prometheus:
+        condition: service_started
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # UI
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    volumes:
+      - ./compose/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  # ---------------------------------------------------------------------------
+  # Migrations — runs schema + seed, then exits
+  # ---------------------------------------------------------------------------
+  migrate:
+    image: ghcr.io/amacneil/dbmate:2
+    command: ["--wait", "up"]
+    environment:
+      DATABASE_URL: "postgres://catalog:catalog@postgres:5432/catalog?sslmode=disable"
+    volumes:
+      - ./migrations:/db/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  opensearch_data:
+  localstack_data:

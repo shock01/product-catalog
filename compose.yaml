@@ -1,0 +1,5 @@
+name: product-catalog
+
+include:
+  - path: compose/infra.yaml
+  - path: compose/apps.yaml
