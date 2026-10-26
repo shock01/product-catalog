@@ -42,10 +42,6 @@ See ADR-010 for the full rationale. Key points:
 - On product creation: add ID to in-memory filter immediately
 - On product deletion: filter is eventually consistent (false positives allowed; Postgres is authoritative)
 
-## Idempotency Keys
-- Stored in Valkey with TTL 24h: key `idem:{key}`, value = serialised response
-- Checked before processing; if found, return cached response immediately
-
 ## Observability (see ADR-008)
 - Single instrumentation layer: OpenTelemetry Go SDK for traces, metrics, and logs
 - **Traces**: auto-instrument HTTP, pgx, Valkey, OpenSearch, SQS/EventBridge spans; propagate W3C `traceparent` on all inbound/outbound calls; embed `trace_id`+`span_id` in outbox event payloads for cross-service linking

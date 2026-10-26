@@ -56,7 +56,7 @@ Create a Postgres view per channel × locale combination, e.g.:
 ### Versioning & Optimistic Locking
 - Every mutable table carries a `version INTEGER NOT NULL DEFAULT 1`
 - All UPDATE statements include `WHERE id = $1 AND version = $2`
-- The HTTP layer enforces `If-Match: "<version>"` on PUT/PATCH; returns 412 on mismatch
+- The HTTP layer enforces `If-Match: "<etag>"` on PUT/PATCH; returns 412 on mismatch
 
 ### Outbox Table
 ```sql

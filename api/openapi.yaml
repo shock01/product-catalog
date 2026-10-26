@@ -138,17 +138,6 @@ components:
         type: string
         example: '"a3f8c2d1e4b09712"'
 
-    IdempotencyKey:
-      name: Idempotency-Key
-      in: header
-      required: false
-      description: |
-        Client-generated UUID. If a POST with this key was already processed
-        within 24 h the original response is returned without re-processing.
-      schema:
-        type: string
-        format: uuid
-
     LocaleParam:
       name: locale
       in: query
@@ -936,13 +925,10 @@ paths:
       summary: Create a product
       description: |
         Creates a new Product aggregate. Supply at least one variant and one
-        translation. Optionally provide an `Idempotency-Key` header to make
-        the request safe to retry.
+        translation.
       tags: [catalog/product]
       security:
         - oauth2: [catalog:product:write]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:

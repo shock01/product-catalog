@@ -31,7 +31,7 @@ graph TD
     end
 
     PG[("PostgreSQL\nproducts · variants · assets\nlocales · translations\nchannel_products · stock_levels\nsnapshots · outbox")]
-    Valkey[("Valkey\nproduct:{id} TTL 5m\nidem:{key} TTL 24h")]
+    Valkey[("Valkey\nproduct:{id} TTL 5m")]
     OS[("OpenSearch\nproducts-web-en-gb\nproducts-web-de-de\nproducts-pos-en-gb · ...")]
 
     Athena -->|"UNLOAD to Parquet"| S3
@@ -72,7 +72,7 @@ sequenceDiagram
     participant V as Valkey
     participant PG as PostgreSQL
 
-    C->>A: GET /v1/products/{id}
+    C->>A: GET /catalog/product/v1/{id}
     A->>BF: check(id)
     alt ID definitely absent
         BF-->>A: false
@@ -109,7 +109,7 @@ sequenceDiagram
     participant OW as Outbox Worker
     participant EB as EventBridge
 
-    C->>A: PUT /v1/products/{id}\nIf-Match: "3"
+    C->>A: PUT /catalog/product/v1/{id}\nIf-Match: "<etag>"
     A->>PG: BEGIN\nUPDATE products SET ..., version=4\nWHERE id=$1 AND version=3\nINSERT INTO outbox (event_type, payload)\nCOMMIT
     alt version mismatch (rows_affected=0)
         PG-->>A: 0 rows updated
@@ -117,7 +117,7 @@ sequenceDiagram
     else success
         PG-->>A: 1 row updated
         A->>V: DEL product:{id}
-        A-->>C: 200 ETag: "4"
+        A-->>C: 202 ETag: "<new-etag>"
         OW->>PG: poll outbox WHERE dispatched_at IS NULL
         OW->>EB: PutEvents product.updated
         OW->>PG: UPDATE outbox SET dispatched_at=now()

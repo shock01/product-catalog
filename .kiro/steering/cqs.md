@@ -51,7 +51,7 @@ Mutating endpoints do **not** return the resource body. They return a `CommandRe
 | `DELETE` | `/catalog/product/v1/{id}` | `202` + `CommandResponse` (links: search) |
 
 The `Location` header on `POST` points to the newly created resource.
-The `ETag` header on all command responses carries the new content-derived ETag so the client can issue the next mutation without a round-trip GET.
+The `ETag` header on all command responses carries the new ETag so the client can issue the next mutation without a round-trip GET.
 
 ### Why `202` and not `200` / `201` / `204`?
 
@@ -64,7 +64,7 @@ The `ETag` header on all command responses carries the new content-derived ETag 
 | Status | Meaning |
 |---|---|
 | `400 Bad Request` | Request body failed schema validation |
-| `409 Conflict` | Duplicate SKU or idempotency key collision with a different payload |
+| `409 Conflict` | Duplicate SKU |
 | `412 Precondition Failed` | `If-Match` ETag does not match current resource version |
 | `422 Unprocessable Entity` | Request is valid JSON but violates a domain invariant |
 

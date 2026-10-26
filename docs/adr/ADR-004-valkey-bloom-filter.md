@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-Single-product `GET /v1/products/{id}` is the highest-volume endpoint. Reads vastly outnumber writes. We need to protect Postgres from both legitimate read load and out-of-service / enumeration attacks where clients request IDs that do not exist, causing cache misses that fall through to the database.
+Single-product `GET /catalog/product/v1/{id}` is the highest-volume endpoint. Reads vastly outnumber writes. We need to protect Postgres from both legitimate read load and out-of-service / enumeration attacks where clients request IDs that do not exist, causing cache misses that fall through to the database.
 
 ## Decision
 Place a Valkey (Redis-compatible) cache in front of Postgres for single-product lookups, and load a Bloom filter at startup to short-circuit requests for non-existent IDs before they reach the cache or database.

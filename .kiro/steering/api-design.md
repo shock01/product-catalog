@@ -37,11 +37,10 @@ See `.kiro/steering/cqs.md` for the full principle, layer-by-layer rules, and ra
 - **Commands** (`POST`, `PUT`, `PATCH`, `DELETE`) return `202 Accepted` with a `CommandResponse` containing only `links` — no resource body
 - The client follows the `self` link to fetch updated state; the `ETag` on the `202` enables chained mutations without a round-trip GET
 
-## Idempotency & Optimistic Locking
-- All mutating endpoints (PUT, PATCH, DELETE) require an `If-Match: "<version>"` header
-- The version value is the `ETag` returned on GET responses
-- Returns `412 Precondition Failed` if the version does not match
-- POST (create) accepts an optional `Idempotency-Key` header; duplicate requests with the same key return the original response
+## Optimistic Locking
+- All mutating endpoints (PUT, PATCH, DELETE) require an `If-Match: "<etag>"` request header
+- The ETag is returned in the `ETag` response header on GET
+- Returns `412 Precondition Failed` if the ETag does not match
 
 ## Pagination
 - List endpoints use cursor-based pagination: `?cursor=<opaque>&limit=<n>`
@@ -56,7 +55,7 @@ See `.kiro/steering/cqs.md` for the full principle, layer-by-layer rules, and ra
 ```json
 {
   "data": { ... },
-  "meta": { "version": "3", "cursor": "..." }
+  "meta": { "version": 3, "cursor": "..." }
 }
 ```
 

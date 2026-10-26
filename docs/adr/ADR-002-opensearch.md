@@ -7,7 +7,7 @@ Accepted
 The catalog holds hundreds of thousands of products. Clients need to filter by category, price range, locale, and channel, with full-text search and cursor-based pagination. These queries are read-heavy and need sub-100ms p99 latency.
 
 ## Decision
-Use OpenSearch as the search and list backend. All `GET /v1/products` (list/filter) requests are served from OpenSearch. Single-product `GET /v1/products/{id}` is served from Postgres (with Valkey cache).
+Use OpenSearch as the search and list backend. All `GET /catalog/search/v1` (list/filter) requests are served from OpenSearch. Single-product `GET /catalog/product/v1/{id}` is served from Postgres (with Valkey cache).
 
 ## Rationale
 - Inverted index makes full-text and faceted filtering orders of magnitude faster than Postgres `LIKE` or even GIN indexes at this data volume
