@@ -1,0 +1,68 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - gosec
+    - bodyclose
+    - noctx
+    - wrapcheck
+    - revive
+    - gocritic
+    - exhaustive
+    - cyclop
+    - gocognit
+
+  settings:
+    cyclop:
+      max-complexity: 15
+    gocognit:
+      min-complexity: 35
+    exhaustive:
+      default-signifies-exhaustive: true
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - .Wrap(
+        - .Wrapf(
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+
+  exclusions:
+    # internal/gen is generated code — never linted
+    # internal/app is superseded by internal/usecase — pre-existing skeleton
+    paths:
+      - internal/gen
+      - internal/app
+
+    rules:
+      # tx.Rollback in defer is intentionally fire-and-forget
+      - source: "defer tx.Rollback"
+        linters:
+          - errcheck
+      # pre-existing skeleton repository — wrapcheck/complexity enforced on new code only
+      - path: internal/repository/
+        linters:
+          - wrapcheck
+          - cyclop
+          - gocognit
+      # cmd mains are top-level — wrapcheck not applicable
+      - path: cmd/.*/main\.go
+        linters:
+          - wrapcheck
+      # test files get relaxed rules
+      - path: _test\.go
+        linters:
+          - exhaustive
+          - gocognit
+          - gosec
+          - wrapcheck

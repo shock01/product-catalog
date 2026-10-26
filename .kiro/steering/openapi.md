@@ -18,11 +18,12 @@ The `api/` directory is the correct and conventional home for protocol contracts
 - External `$ref` files (e.g. shared schemas) may live under `api/schemas/` if the spec grows large, but the entrypoint is always `api/openapi.yaml`
 
 ## Code Generation
-- Tool: [`oapi-codegen`](https://github.com/deepmap/oapi-codegen)
-- Generated output goes to `internal/app/generated/` — never edited by hand
+- Tool: [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen) v2
+- Generated output goes to `internal/gen/api.gen.go` — never edited by hand
 - Regenerate with: `make generate`
 - The `Makefile` target runs: `oapi-codegen -config api/oapi-codegen.yaml api/openapi.yaml`
-- Generation config (`api/oapi-codegen.yaml`) controls which packages are emitted (server stubs, types, client)
+- Generation config (`api/oapi-codegen.yaml`) emits strict chi server stubs + models into package `gen`
+- A `//go:generate` directive in `internal/gen/generate.go` means `go generate ./...` also works
 
 ## Workflow Rule
 The spec is the **single source of truth**. The correct order of changes is always:
