@@ -1,4 +1,4 @@
-.PHONY: tools generate lint build docker-build
+.PHONY: tools generate lint build check docker-build
 
 GOPATH := $(shell go env GOPATH)
 
@@ -26,6 +26,12 @@ generate: tools
 
 lint:
 	$(GOPATH)/bin/golangci-lint run ./...
+
+# ---------------------------------------------------------------------------
+# Pre-commit check (required when api/openapi.yaml changes)
+# ---------------------------------------------------------------------------
+
+check: generate build lint
 
 # ---------------------------------------------------------------------------
 # Build

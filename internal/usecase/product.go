@@ -85,11 +85,19 @@ func (s *ProductService) Create(ctx context.Context, p *domain.Product) error {
 	if err := p.Validate(); err != nil {
 		return fmt.Errorf("validate: %w", err)
 	}
-	if err := s.products.Save(ctx, p); err != nil {
+	tx, err := s.products.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := s.products.SaveTx(ctx, tx, p); err != nil {
 		return fmt.Errorf("save product: %w", err)
 	}
-	if err := s.outbox.Append(ctx, []domain.Event{newEvent(domain.EventProductCreated, p.ID, nil)}); err != nil {
+	if err := s.outbox.AppendTx(ctx, tx, []domain.Event{newEvent(domain.EventProductCreated, p.ID, nil)}); err != nil {
 		return fmt.Errorf("append outbox: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
@@ -98,35 +106,59 @@ func (s *ProductService) Update(ctx context.Context, p *domain.Product) error {
 	if err := p.Validate(); err != nil {
 		return fmt.Errorf("validate: %w", err)
 	}
-	if err := s.products.Save(ctx, p); err != nil {
+	tx, err := s.products.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := s.products.SaveTx(ctx, tx, p); err != nil {
 		return fmt.Errorf("save product: %w", err)
 	}
-	s.invalidate(ctx, p.ID)
-	if err := s.outbox.Append(ctx, []domain.Event{newEvent(domain.EventProductUpdated, p.ID, nil)}); err != nil {
+	if err := s.outbox.AppendTx(ctx, tx, []domain.Event{newEvent(domain.EventProductUpdated, p.ID, nil)}); err != nil {
 		return fmt.Errorf("append outbox: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	s.invalidate(ctx, p.ID)
 	return nil
 }
 
 func (s *ProductService) Patch(ctx context.Context, p *domain.Product) error {
-	if err := s.products.Patch(ctx, p); err != nil {
+	tx, err := s.products.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := s.products.PatchTx(ctx, tx, p); err != nil {
 		return fmt.Errorf("patch product: %w", err)
 	}
-	s.invalidate(ctx, p.ID)
-	if err := s.outbox.Append(ctx, []domain.Event{newEvent(domain.EventProductUpdated, p.ID, nil)}); err != nil {
+	if err := s.outbox.AppendTx(ctx, tx, []domain.Event{newEvent(domain.EventProductUpdated, p.ID, nil)}); err != nil {
 		return fmt.Errorf("append outbox: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	s.invalidate(ctx, p.ID)
 	return nil
 }
 
 func (s *ProductService) Delete(ctx context.Context, id uuid.UUID, version int) error {
-	if err := s.products.Delete(ctx, id, version); err != nil {
+	tx, err := s.products.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := s.products.DeleteTx(ctx, tx, id, version); err != nil {
 		return fmt.Errorf("delete product: %w", err)
 	}
-	s.invalidate(ctx, id)
-	if err := s.outbox.Append(ctx, []domain.Event{newEvent(domain.EventProductDeleted, id, nil)}); err != nil {
+	if err := s.outbox.AppendTx(ctx, tx, []domain.Event{newEvent(domain.EventProductDeleted, id, nil)}); err != nil {
 		return fmt.Errorf("append outbox: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	s.invalidate(ctx, id)
 	return nil
 }
 

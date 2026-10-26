@@ -53,15 +53,18 @@ Contexts map directly to OAuth 2.0 scopes, allowing fine-grained access control 
 
 | Scope | Grants access to | Typical consumer |
 |---|---|---|
-| `catalog:product:read` | `GET /catalog/product/v1/{id}` | Storefront, mobile app, internal services |
+| `catalog:product:read` | `GET /catalog/product/v1/{id}` — any product status | PIM, admin tooling, internal services |
 | `catalog:product:write` | `POST`, `PUT`, `PATCH`, `DELETE` on `catalog/product/v1` | PIM, admin tooling, import pipelines |
-| `catalog:search:read` | `GET /catalog/search/v1` | Storefront, mobile app, search UI |
+| *(none)* | `GET /catalog/search/v1` | Storefront, mobile app, public search UI |
 
 ### Rules
-- `catalog:search:read` does **not** grant access to `catalog/product` endpoints and vice versa
-- Write scopes require `catalog:product:write`; read-only consumers should only be granted `catalog:product:read` and/or `catalog:search:read`
-- Scopes are declared in the OpenAPI spec under `securitySchemes` and applied per-operation via `security` blocks
-- The API gateway / auth middleware enforces scopes; the application layer trusts the validated token claims
+- `catalog/search` is a **public endpoint** — no OAuth scope required. Visibility is enforced at index time: only `published` products with at least one non-OOS variant and an enabled channel listing are indexed. There is nothing sensitive in the OpenSearch index.
+- `catalog/product` is an **internal endpoint** — always requires a scope. It returns products of any status (including `draft`, `archived`). Public storefronts must not be granted `catalog:product:read`.
+- Public storefronts discover products via `catalog/search` and follow the `self` link in search results. They never need to call `catalog/product/{id}` directly.
+- Do not introduce a weaker `catalog:product:read:public` scope that changes the behaviour of `GET /catalog/product/v1/{id}` based on the token. That creates a hidden API version and breaks cache sharing. If visibility filtering by status is needed for a new consumer, introduce a new endpoint or context.
+- Write scopes require `catalog:product:write`; read-only internal consumers should only be granted `catalog:product:read`.
+- Scopes are declared in the OpenAPI spec under `securitySchemes` and applied per-operation via `security` blocks.
+- The API gateway / auth middleware enforces scopes; the application layer trusts the validated token claims.
 
 ---
 
@@ -85,9 +88,8 @@ components:
         clientCredentials:
           tokenUrl: https://auth.example.com/oauth/token
           scopes:
-            catalog:product:read:  Read a single product by ID
-            catalog:product:write: Create, update, and delete products
-            catalog:search:read:   Search and list products
+            catalog:product:read:  Read a single product by ID (any status). Internal consumers only.
+            catalog:product:write: Create, update, and delete products. Internal consumers only.
 
 paths:
   /catalog/product/v1:
@@ -117,8 +119,7 @@ paths:
   /catalog/search/v1:
     get:
       operationId: searchProducts
-      security:
-        - oauth2: [catalog:search:read]
+      security: []  # public — no scope required
 ```
 
 ---

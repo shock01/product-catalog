@@ -13,16 +13,48 @@ import (
 	"github.com/shock01/product-catalog/internal/domain"
 )
 
+// tx wraps pgx.Tx to implement domain.Tx.
+type tx struct{ pgx.Tx }
+
+func (t *tx) Commit(ctx context.Context) error   { return t.Tx.Commit(ctx) }
+func (t *tx) Rollback(ctx context.Context) error { return t.Tx.Rollback(ctx) }
+
 type ProductRepo struct{ db *pgxpool.Pool }
 
 func NewProductRepo(db *pgxpool.Pool) *ProductRepo { return &ProductRepo{db: db} }
 
 // ---------------------------------------------------------------------------
-// GetByID
+// BeginTx
+// ---------------------------------------------------------------------------
+
+func (r *ProductRepo) BeginTx(ctx context.Context) (domain.Tx, error) {
+	t, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	return &tx{t}, nil
+}
+
+// ---------------------------------------------------------------------------
+// GetByID — repeatable-read snapshot so all child queries see the same version
 // ---------------------------------------------------------------------------
 
 func (r *ProductRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Product, error) {
-	row := r.db.QueryRow(ctx, `
+	t, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("begin read tx: %w", err)
+	}
+	defer t.Rollback(ctx) //nolint:errcheck // read-only rollback is always safe to ignore
+
+	p, err := r.getByIDTx(ctx, t, id)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (r *ProductRepo) getByIDTx(ctx context.Context, t pgx.Tx, id uuid.UUID) (*domain.Product, error) {
+	row := t.QueryRow(ctx, `
 		SELECT id, snapshot_id, status, version, created_at, updated_at, deleted_at
 		FROM products WHERE id = $1`, id)
 
@@ -39,23 +71,27 @@ func (r *ProductRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Produc
 		return nil, domain.ErrDeleted
 	}
 
-	if err := r.loadTranslations(ctx, p); err != nil {
+	if err := loadTranslations(ctx, t, p); err != nil {
 		return nil, err
 	}
-	if err := r.loadOptions(ctx, p); err != nil {
+	if err := loadOptions(ctx, t, p); err != nil {
 		return nil, err
 	}
-	if err := r.loadVariants(ctx, p); err != nil {
+	if err := loadVariants(ctx, t, p); err != nil {
 		return nil, err
 	}
-	if err := r.loadChannelListings(ctx, p); err != nil {
+	if err := loadChannelListings(ctx, t, p); err != nil {
 		return nil, err
 	}
 	return p, nil
 }
 
-func (r *ProductRepo) loadTranslations(ctx context.Context, p *domain.Product) error {
-	rows, err := r.db.Query(ctx, `
+// ---------------------------------------------------------------------------
+// Load helpers — accept pgx.Tx so they work inside any transaction
+// ---------------------------------------------------------------------------
+
+func loadTranslations(ctx context.Context, t pgx.Tx, p *domain.Product) error {
+	rows, err := t.Query(ctx, `
 		SELECT locale_code, title, slug,
 		       COALESCE(description,''), COALESCE(short_description,''),
 		       COALESCE(meta_title,''), COALESCE(meta_description,'')
@@ -65,25 +101,25 @@ func (r *ProductRepo) loadTranslations(ctx context.Context, p *domain.Product) e
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var t domain.ProductTranslation
-		if err := rows.Scan(&t.Locale, &t.Title, &t.Slug, &t.Description,
-			&t.ShortDescription, &t.MetaTitle, &t.MetaDescription); err != nil {
-			return err
+		var tr domain.ProductTranslation
+		if err := rows.Scan(&tr.Locale, &tr.Title, &tr.Slug, &tr.Description,
+			&tr.ShortDescription, &tr.MetaTitle, &tr.MetaDescription); err != nil {
+			return fmt.Errorf("product_translations scan: %w", err)
 		}
-		p.Translations = append(p.Translations, t)
+		p.Translations = append(p.Translations, tr)
 	}
-	return rows.Err()
+	return fmt.Errorf("product_translations rows: %w", rows.Err())
 }
 
-func (r *ProductRepo) loadOptions(ctx context.Context, p *domain.Product) error {
-	rows, err := r.db.Query(ctx, `
+func loadOptions(ctx context.Context, t pgx.Tx, p *domain.Product) error {
+	rows, err := t.Query(ctx, `
 		SELECT o.id, o.code, o.sort_order,
 		       ot.locale_code, ot.name,
 		       ov.id, ov.code, ov.sort_order,
 		       ovt.locale_code, ovt.value
 		FROM options o
-		JOIN option_translations ot   ON ot.option_id = o.id
-		JOIN option_values ov         ON ov.option_id = o.id
+		JOIN option_translations ot        ON ot.option_id = o.id
+		JOIN option_values ov              ON ov.option_id = o.id
 		JOIN option_value_translations ovt ON ovt.option_value_id = ov.id
 		WHERE o.product_id = $1
 		ORDER BY o.sort_order, ov.sort_order`, p.ID)
@@ -97,15 +133,15 @@ func (r *ProductRepo) loadOptions(ctx context.Context, p *domain.Product) error 
 
 	for rows.Next() {
 		var (
-			oID, ovID                          uuid.UUID
-			oCode, oTLocale, oTName            string
-			oSort                              int
-			ovCode, ovTLocale, ovTValue        string
-			ovSort                             int
+			oID, ovID                   uuid.UUID
+			oCode, oTLocale, oTName     string
+			oSort                       int
+			ovCode, ovTLocale, ovTValue string
+			ovSort                      int
 		)
 		if err := rows.Scan(&oID, &oCode, &oSort, &oTLocale, &oTName,
 			&ovID, &ovCode, &ovSort, &ovTLocale, &ovTValue); err != nil {
-			return err
+			return fmt.Errorf("options scan: %w", err)
 		}
 		if _, ok := optMap[oID]; !ok {
 			optMap[oID] = &domain.Option{ID: oID, Code: oCode, SortOrder: oSort}
@@ -113,10 +149,9 @@ func (r *ProductRepo) loadOptions(ctx context.Context, p *domain.Product) error 
 		}
 		opt := optMap[oID]
 
-		// add translation if not already present
 		hasTrans := false
-		for _, t := range opt.Translations {
-			if t.Locale == oTLocale {
+		for _, tr := range opt.Translations {
+			if tr.Locale == oTLocale {
 				hasTrans = true
 				break
 			}
@@ -125,7 +160,6 @@ func (r *ProductRepo) loadOptions(ctx context.Context, p *domain.Product) error 
 			opt.Translations = append(opt.Translations, domain.OptionTranslation{Locale: oTLocale, Name: oTName})
 		}
 
-		// add option value if not already present
 		ovIdx := -1
 		for i, ov := range opt.Values {
 			if ov.ID == ovID {
@@ -141,7 +175,7 @@ func (r *ProductRepo) loadOptions(ctx context.Context, p *domain.Product) error 
 			domain.OptionValueTranslation{Locale: ovTLocale, Value: ovTValue})
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return fmt.Errorf("options rows: %w", err)
 	}
 	for _, id := range optOrder {
 		p.Options = append(p.Options, *optMap[id])
@@ -149,14 +183,14 @@ func (r *ProductRepo) loadOptions(ctx context.Context, p *domain.Product) error 
 	return nil
 }
 
-func (r *ProductRepo) loadVariants(ctx context.Context, p *domain.Product) error {
-	rows, err := r.db.Query(ctx, `
+func loadVariants(ctx context.Context, t pgx.Tx, p *domain.Product) error {
+	rows, err := t.Query(ctx, `
 		SELECT v.id, v.sku, v.price, v.currency, v.version,
 		       sl.warehouse_code, sl.level, sl.version,
 		       vov.option_value_id
 		FROM variants v
-		LEFT JOIN stock_levels sl             ON sl.variant_id = v.id
-		LEFT JOIN variant_option_values vov   ON vov.variant_id = v.id
+		LEFT JOIN stock_levels sl           ON sl.variant_id = v.id
+		LEFT JOIN variant_option_values vov ON vov.variant_id = v.id
 		WHERE v.product_id = $1`, p.ID)
 	if err != nil {
 		return fmt.Errorf("variants: %w", err)
@@ -168,18 +202,18 @@ func (r *ProductRepo) loadVariants(ctx context.Context, p *domain.Product) error
 
 	for rows.Next() {
 		var (
-			vID              uuid.UUID
-			sku, currency    string
-			price            float64
-			version          int
-			whCode           *string
-			slLevel          *string
-			slVersion        *int
-			ovID             *uuid.UUID
+			vID           uuid.UUID
+			sku, currency string
+			price         float64
+			version       int
+			whCode        *string
+			slLevel       *string
+			slVersion     *int
+			ovID          *uuid.UUID
 		)
 		if err := rows.Scan(&vID, &sku, &price, &currency, &version,
 			&whCode, &slLevel, &slVersion, &ovID); err != nil {
-			return err
+			return fmt.Errorf("variants scan: %w", err)
 		}
 		if _, ok := varMap[vID]; !ok {
 			varMap[vID] = &domain.Variant{ID: vID, SKU: sku, Price: price, Currency: currency, Version: version}
@@ -216,7 +250,7 @@ func (r *ProductRepo) loadVariants(ctx context.Context, p *domain.Product) error
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return fmt.Errorf("variants rows: %w", err)
 	}
 	for _, id := range varOrder {
 		p.Variants = append(p.Variants, *varMap[id])
@@ -224,8 +258,8 @@ func (r *ProductRepo) loadVariants(ctx context.Context, p *domain.Product) error
 	return nil
 }
 
-func (r *ProductRepo) loadChannelListings(ctx context.Context, p *domain.Product) error {
-	rows, err := r.db.Query(ctx, `
+func loadChannelListings(ctx context.Context, t pgx.Tx, p *domain.Product) error {
+	rows, err := t.Query(ctx, `
 		SELECT channel_id, enabled, price_override, COALESCE(currency,''), version
 		FROM channel_products WHERE product_id = $1`, p.ID)
 	if err != nil {
@@ -235,11 +269,14 @@ func (r *ProductRepo) loadChannelListings(ctx context.Context, p *domain.Product
 	for rows.Next() {
 		var cl domain.ChannelListing
 		if err := rows.Scan(&cl.ChannelID, &cl.Enabled, &cl.PriceOverride, &cl.Currency, &cl.Version); err != nil {
-			return err
+			return fmt.Errorf("channel_products scan: %w", err)
 		}
 		p.ChannelListings = append(p.ChannelListings, cl)
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("channel_products rows: %w", err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -275,12 +312,12 @@ func (r *ProductRepo) List(ctx context.Context, f domain.ListFilter) ([]*domain.
 	for rows.Next() {
 		var id uuid.UUID
 		if err := rows.Scan(&id); err != nil {
-			return nil, "", err
+			return nil, "", fmt.Errorf("list scan: %w", err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("list rows: %w", err)
 	}
 
 	var nextCursor string
@@ -301,18 +338,13 @@ func (r *ProductRepo) List(ctx context.Context, f domain.ListFilter) ([]*domain.
 }
 
 // ---------------------------------------------------------------------------
-// Save — full upsert
+// SaveTx — full upsert within caller-supplied transaction
 // ---------------------------------------------------------------------------
 
-func (r *ProductRepo) Save(ctx context.Context, p *domain.Product) error {
-	tx, err := r.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
+func (r *ProductRepo) SaveTx(ctx context.Context, dtx domain.Tx, p *domain.Product) error {
+	t := dtx.(*tx).Tx
 	now := time.Now()
-	tag, err := tx.Exec(ctx, `
+	tag, err := t.Exec(ctx, `
 		INSERT INTO products (id, snapshot_id, status, version, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6)
 		ON CONFLICT (id) DO UPDATE
@@ -326,47 +358,41 @@ func (r *ProductRepo) Save(ctx context.Context, p *domain.Product) error {
 		return domain.ErrVersionConflict
 	}
 
-	if _, err := tx.Exec(ctx, `DELETE FROM product_translations WHERE product_id=$1`, p.ID); err != nil {
-		return err
+	if _, err := t.Exec(ctx, `DELETE FROM product_translations WHERE product_id=$1`, p.ID); err != nil {
+		return fmt.Errorf("delete translations: %w", err)
 	}
-	for _, t := range p.Translations {
-		if _, err := tx.Exec(ctx, `
+	for _, tr := range p.Translations {
+		if _, err := t.Exec(ctx, `
 			INSERT INTO product_translations
 			  (product_id,locale_code,title,slug,description,short_description,meta_title,meta_description)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-			p.ID, t.Locale, t.Title, t.Slug, t.Description,
-			t.ShortDescription, t.MetaTitle, t.MetaDescription); err != nil {
-			return err
+			p.ID, tr.Locale, tr.Title, tr.Slug, tr.Description,
+			tr.ShortDescription, tr.MetaTitle, tr.MetaDescription); err != nil {
+			return fmt.Errorf("insert translation: %w", err)
 		}
 	}
 
-	if _, err := tx.Exec(ctx, `DELETE FROM channel_products WHERE product_id=$1`, p.ID); err != nil {
-		return err
+	if _, err := t.Exec(ctx, `DELETE FROM channel_products WHERE product_id=$1`, p.ID); err != nil {
+		return fmt.Errorf("delete channel_products: %w", err)
 	}
 	for _, cl := range p.ChannelListings {
-		if _, err := tx.Exec(ctx, `
+		if _, err := t.Exec(ctx, `
 			INSERT INTO channel_products (channel_id,product_id,enabled,price_override,currency,version)
 			VALUES ($1,$2,$3,$4,$5,$6)`,
 			cl.ChannelID, p.ID, cl.Enabled, cl.PriceOverride, cl.Currency, cl.Version); err != nil {
-			return err
+			return fmt.Errorf("insert channel_product: %w", err)
 		}
 	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
-// Patch — partial update (status + channel listings)
+// PatchTx — partial update within caller-supplied transaction
 // ---------------------------------------------------------------------------
 
-func (r *ProductRepo) Patch(ctx context.Context, p *domain.Product) error {
-	tx, err := r.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	tag, err := tx.Exec(ctx, `
+func (r *ProductRepo) PatchTx(ctx context.Context, dtx domain.Tx, p *domain.Product) error {
+	t := dtx.(*tx).Tx
+	tag, err := t.Exec(ctx, `
 		UPDATE products SET status=$1, version=version+1, updated_at=now()
 		WHERE id=$2 AND version=$3 AND deleted_at IS NULL`,
 		p.Status, p.ID, p.Version)
@@ -378,23 +404,41 @@ func (r *ProductRepo) Patch(ctx context.Context, p *domain.Product) error {
 	}
 
 	if p.ChannelListings != nil {
-		if _, err := tx.Exec(ctx, `DELETE FROM channel_products WHERE product_id=$1`, p.ID); err != nil {
-			return err
+		if _, err := t.Exec(ctx, `DELETE FROM channel_products WHERE product_id=$1`, p.ID); err != nil {
+			return fmt.Errorf("delete channel_products: %w", err)
 		}
 		for _, cl := range p.ChannelListings {
-			if _, err := tx.Exec(ctx, `
+			if _, err := t.Exec(ctx, `
 				INSERT INTO channel_products (channel_id,product_id,enabled,price_override,currency,version)
 				VALUES ($1,$2,$3,$4,$5,1)`,
 				cl.ChannelID, p.ID, cl.Enabled, cl.PriceOverride, cl.Currency); err != nil {
-				return err
+				return fmt.Errorf("insert channel_product: %w", err)
 			}
 		}
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
-// Delete — soft delete
+// DeleteTx — soft delete within caller-supplied transaction
+// ---------------------------------------------------------------------------
+
+func (r *ProductRepo) DeleteTx(ctx context.Context, dtx domain.Tx, id uuid.UUID, version int) error {
+	t := dtx.(*tx).Tx
+	tag, err := t.Exec(ctx, `
+		UPDATE products SET deleted_at=now(), updated_at=now(), version=version+1
+		WHERE id=$1 AND version=$2 AND deleted_at IS NULL`, id, version)
+	if err != nil {
+		return fmt.Errorf("delete product: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrVersionConflict
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Delete — convenience wrapper (no outbox; use DeleteTx in production)
 // ---------------------------------------------------------------------------
 
 func (r *ProductRepo) Delete(ctx context.Context, id uuid.UUID, version int) error {
@@ -411,20 +455,21 @@ func (r *ProductRepo) Delete(ctx context.Context, id uuid.UUID, version int) err
 }
 
 // ---------------------------------------------------------------------------
-// OutboxRepo
+// OutboxRepo — AppendTx writes inside the caller's transaction
 // ---------------------------------------------------------------------------
 
 type OutboxRepo struct{ db *pgxpool.Pool }
 
 func NewOutboxRepo(db *pgxpool.Pool) *OutboxRepo { return &OutboxRepo{db: db} }
 
-func (r *OutboxRepo) Append(ctx context.Context, events []domain.Event) error {
+func (r *OutboxRepo) AppendTx(ctx context.Context, dtx domain.Tx, events []domain.Event) error {
+	t := dtx.(*tx).Tx
 	for _, e := range events {
 		payload, err := json.Marshal(e.Payload)
 		if err != nil {
-			return err
+			return fmt.Errorf("marshal event payload: %w", err)
 		}
-		if _, err := r.db.Exec(ctx, `
+		if _, err := t.Exec(ctx, `
 			INSERT INTO outbox (id,aggregate,aggregate_id,event_type,payload,trace_id,span_id)
 			VALUES ($1,'product',$2,$3,$4,$5,$6)`,
 			e.ID, e.AggregateID, string(e.Type), payload, e.TraceID, e.SpanID); err != nil {

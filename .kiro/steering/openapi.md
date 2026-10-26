@@ -30,11 +30,19 @@ The spec is the **single source of truth**. The correct order of changes is alwa
 
 ```
 1. Update api/openapi.yaml
-2. Run make generate
-3. Implement the handler against the generated interface
+2. make generate        — regenerates internal/gen/api.gen.go
+3. make build          — verify the codebase compiles against the new generated types
+4. Implement/update the handler against the generated interface
+5. make build          — verify again after handler changes
+6. Commit api/openapi.yaml, internal/gen/api.gen.go, and handler changes together
 ```
 
 Never write a handler first and retrofit the spec. Never modify generated files.
+
+**Before every commit that touches `api/openapi.yaml`:**
+- `make generate` must have been run and `internal/gen/api.gen.go` must be up to date
+- `make build` must pass with zero errors
+- Both files must be staged in the same commit — a spec change without the regenerated file, or a regenerated file without a passing build, must not be committed
 
 ## Versioning
 - Version is the third path segment: `/{domain}/{context}/{version}/{id}` — see `.kiro/steering/url-structure.md`

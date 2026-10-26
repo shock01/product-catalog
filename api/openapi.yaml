@@ -7,10 +7,21 @@ info:
     REST API for the Product Catalog bounded context.
 
     Two sub-contexts are exposed under the `catalog` domain:
-    - **catalog/product** — CRUD operations backed by PostgreSQL (via Valkey cache). Requires `catalog:product:read` or `catalog:product:write`.
-    - **catalog/search** — Read-only search and listing backed by OpenSearch. Requires `catalog:search:read`.
+    - **catalog/product** — CRUD and single-resource reads backed by PostgreSQL (via Valkey cache). Internal endpoint — requires `catalog:product:read` or `catalog:product:write`. Returns products of any status.
+    - **catalog/search** — Read-only search and listing backed by OpenSearch. Public endpoint — no OAuth scope required. Returns only `published`, in-stock, channel-enabled products (enforced at index time).
 
     All mutating operations are idempotent and use optimistic locking via `If-Match` / `ETag` headers.
+
+    ## Cache-Control
+
+    This is a non-functional reference design. `Cache-Control` response headers are not defined here but should be added in a production implementation.
+
+    **Why it matters:**
+    - `GET /catalog/search/v1` is a public, unauthenticated endpoint serving a read-heavy workload. A CDN or reverse proxy (CloudFront, Nginx) can cache responses and absorb the majority of traffic without the request ever reaching the service. A short `Cache-Control: public, max-age=60, stale-while-revalidate=30` is enough to dramatically reduce OpenSearch load.
+    - `GET /catalog/product/v1/{id}` is authenticated and returns status-sensitive data (draft, archived). Responses must not be cached by shared caches. `Cache-Control: private, no-store` is the correct default. The ETag mechanism already handles client-side conditional requests (`If-None-Match`) for free once ETags are in place.
+    - Mutation responses (`202 Accepted`) should carry `Cache-Control: no-store` to prevent any intermediary from caching a command acknowledgement.
+
+    **When to add it:** when a CDN or caching reverse proxy is placed in front of the service, or when client-side caching behaviour needs to be explicitly controlled. The ETag infrastructure is already in place — adding `Cache-Control` headers is an additive, non-breaking change.
 
 servers:
   - url: https://api.example.com
@@ -29,9 +40,8 @@ components:
         clientCredentials:
           tokenUrl: https://auth.example.com/oauth/token
           scopes:
-            catalog:product:read: Read a single product by ID
-            catalog:product:write: Create, update, and delete products
-            catalog:search:read: Search and list products
+            catalog:product:read: Read a single product by ID (any status). Internal consumers only.
+            catalog:product:write: Create, update, and delete products. Internal consumers only.
 
   # -------------------------------------------------------------------------
   # Shared responses
@@ -1131,8 +1141,7 @@ paths:
         channel-aware projections; only `published` products with at least
         one non-OOS variant are returned.
       tags: [catalog/search]
-      security:
-        - oauth2: [catalog:search:read]
+      security: []
       parameters:
         - $ref: '#/components/parameters/LocaleParam'
         - $ref: '#/components/parameters/ChannelParam'
