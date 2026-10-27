@@ -32,7 +32,11 @@ graph TD
 
     VT["<b>VariantTranslation</b>\n─────────────────\nlocale: string\ntitle: string\ndescription: string"]
 
-    CP["<b>ChannelProduct</b>\n─────────────────\nchannel_id: UUID\nenabled: bool\nprice_override: numeric\ncurrency: string\nversion: int"]
+    CP["<b>ChannelProduct</b>\n─────────────────\nchannel_id: UUID\nenabled: bool\nprice_override: numeric  ← legacy fallback\ncurrency: string\nversion: int"]
+
+    PSI["<b>PriceSnapshotImport</b>\n─────────────────\nid: UUID\ns3_uri: string\ndumped_at: timestamptz\nstatus: string"]
+
+    PS["<b>PriceSnapshot</b>\n─────────────────\nid: UUID\nproduct_id: UUID\nchannel_id: UUID?\nmarketplace_id: UUID?\namount: numeric\ncurrency: string\nprice_snapshot_import_id: UUID\neffective_from: timestamptz"]
 
     MP["<b>MarketplaceProduct</b>\n─────────────────\nmarketplace_id: UUID\nexternal_id: string\nfeed_attributes: jsonb\nversion: int"]
 
@@ -52,6 +56,8 @@ graph TD
     PR --> CP
     PR --> MP
     VAR --> SL
+    PR --> PS
+    PSI --> PS
 ```
 
 ---
@@ -112,7 +118,9 @@ graph LR
 | `Asset` | URL, type, sort order; scoped to product or a specific variant | Storage / CDN |
 | `ProductTranslation` | `title`, `slug`, `description`, `short_description`, `meta_title`, `meta_description` per locale | Variant-level copy |
 | `VariantTranslation` | Localised `title` and `description` per locale | Option labels |
-| `ChannelProduct` | Per-channel enabled flag and price override | Channel config — Channel is owned by the Channel Service |
+| `ChannelProduct` | Per-channel enabled flag and legacy `price_override` (fallback only) | Channel config — Channel is owned by the Channel Service |
+| `PriceSnapshotImport` | S3 URI, `dumped_at` timestamp, import status — write-guard for price imports | Price data — PriceSnapshotImport is a write-guard, not a data owner |
+| `PriceSnapshot` | Append-only price record per product × channel × marketplace with `effective_from` | Historical prices are never deleted — archive via cleanup job |
 | `MarketplaceProduct` | External ID and feed attributes per marketplace | Marketplace config — Marketplace is owned by the Marketplace Service |
 | `StockLevel` | Stock status per variant per warehouse (`IN_STOCK`, `LOW`, `OOS`) | Exact quantity — that is owned by the Stock Service |
 
@@ -235,6 +243,25 @@ erDiagram
         int row_count
         string status
     }
+    PRICE_SNAPSHOT_IMPORT {
+        uuid id PK
+        string s3_uri
+        timestamptz dumped_at
+        timestamptz imported_at
+        int row_count
+        string status
+    }
+    PRICE_SNAPSHOT {
+        uuid id PK
+        uuid product_id FK
+        uuid channel_id FK
+        uuid marketplace_id FK
+        numeric amount
+        string currency
+        uuid price_snapshot_import_id FK
+        timestamptz effective_from
+        timestamptz created_at
+    }
 
     PRODUCT ||--o{ OPTION : "defines"
     OPTION ||--o{ OPTION_TRANSLATION : "translated by"
@@ -252,7 +279,50 @@ erDiagram
     VARIANT ||--o{ STOCK_LEVEL : "stocked at"
     SNAPSHOT ||--o{ PRODUCT : "last imported by"
     SNAPSHOT ||--o{ VARIANT : "last imported by"
+    PRICE_SNAPSHOT_IMPORT ||--o{ PRICE_SNAPSHOT : "write-guard for"
+    PRODUCT ||--o{ PRICE_SNAPSHOT : "priced by"
 ```
+
+---
+
+## Pricing Model
+
+Price is per **product × channel × marketplace**, append-only. The `price_snapshots` table is never updated in place — each import appends new rows. The current effective price is resolved by the `v_current_prices` database view.
+
+### Resolution priority (most specific wins)
+
+| channel_id | marketplace_id | Specificity |
+|---|---|---|
+| set | set | 3 — channel + marketplace |
+| set | NULL | 2 — channel only |
+| NULL | set | 1 — marketplace only |
+| NULL | NULL | 0 — global |
+
+Within the same specificity level, the row with the latest `effective_from <= now()` wins.
+
+If no `price_snapshots` row exists for a product, the view falls back to `channel_products.price_override`, then to the minimum `variants.price`. This preserves backward compatibility with data imported before the pricing pipeline existed.
+
+### Write-guard
+
+Each S3 file processed (Kafka stream landing or Athena dump) is recorded as a `price_snapshot_imports` row. The importer only inserts a new `price_snapshots` row when the incoming `effective_from` is strictly newer than the latest existing row for that `product_id × channel_id × marketplace_id`. Re-running the same file is a no-op.
+
+### Ingestion paths
+
+```
+Path A — Kafka stream (near-real-time):
+  pricing.price-changed topic
+    → price-consumer (ECS Service)
+        batches by 5 min or 1,000 records
+        → s3://bucket/pricing/stream/{date}/{hour}/{uuid}.json
+        → S3 ObjectCreated → EventBridge → price-importer (ECS Task)
+
+Path B — Athena full import (bulk / backfill):
+  Athena scheduled query
+    → s3://bucket/pricing/snapshots/{dumped_at}/prices.json
+    → S3 ObjectCreated → EventBridge → price-importer (ECS Task)
+```
+
+Both paths feed the same `price-importer` binary. After committing, the importer emits a `price.imported` outbox event which triggers the same indexer ECS Tasks as `snapshot.imported`.
 
 > `StockStatus` is a domain enum: `IN_STOCK` | `LOW` | `OOS` (out of stock). The Catalog never stores exact quantities — those are owned by the Stock Service. The Catalog receives a translated status via `stock.level_changed` events.
 

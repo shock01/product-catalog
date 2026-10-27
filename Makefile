@@ -1,5 +1,6 @@
 .PHONY: tools generate lint build check docker-build
 
+
 GOPATH := $(shell go env GOPATH)
 
 PLATFORMS := linux/amd64,linux/arm64
@@ -38,9 +39,12 @@ check: generate build lint
 # ---------------------------------------------------------------------------
 
 build:
-	CGO_ENABLED=0 go build -o bin/api      ./cmd/api
-	CGO_ENABLED=0 go build -o bin/indexer  ./cmd/indexer
-	CGO_ENABLED=0 go build -o bin/importer ./cmd/importer
+	CGO_ENABLED=0 go build -o bin/api                ./cmd/api
+	CGO_ENABLED=0 go build -o bin/indexer            ./cmd/indexer
+	CGO_ENABLED=0 go build -o bin/importer           ./cmd/importer
+	CGO_ENABLED=0 go build -o bin/price-consumer     ./cmd/price-consumer
+	CGO_ENABLED=0 go build -o bin/price-importer     ./cmd/price-importer
+	CGO_ENABLED=0 go build -o bin/inventory-consumer ./cmd/inventory-consumer
 
 # ---------------------------------------------------------------------------
 # Docker — multi-platform
@@ -48,8 +52,14 @@ build:
 
 docker-build:
 	docker buildx build --platform $(PLATFORMS) \
-		-f Dockerfile.api     -t $(REGISTRY)/api:$(TAG)      --push .
+		-f Dockerfile.api            -t $(REGISTRY)/api:$(TAG)            --push .
 	docker buildx build --platform $(PLATFORMS) \
-		-f Dockerfile.indexer -t $(REGISTRY)/indexer:$(TAG)  --push .
+		-f Dockerfile.indexer        -t $(REGISTRY)/indexer:$(TAG)        --push .
 	docker buildx build --platform $(PLATFORMS) \
-		-f Dockerfile.importer -t $(REGISTRY)/importer:$(TAG) --push .
+		-f Dockerfile.importer       -t $(REGISTRY)/importer:$(TAG)       --push .
+	docker buildx build --platform $(PLATFORMS) \
+		-f Dockerfile.price-consumer -t $(REGISTRY)/price-consumer:$(TAG) --push .
+	docker buildx build --platform $(PLATFORMS) \
+		-f Dockerfile.price-importer     -t $(REGISTRY)/price-importer:$(TAG)     --push .
+	docker buildx build --platform $(PLATFORMS) \
+		-f Dockerfile.inventory-consumer -t $(REGISTRY)/inventory-consumer:$(TAG) --push .

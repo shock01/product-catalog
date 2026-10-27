@@ -39,6 +39,8 @@ Nine ADRs covering every significant technical choice:
 | [ADR-008](docs/adr/ADR-008-opentelemetry.md) | OpenTelemetry for traces, metrics, and logs |
 | [ADR-009](docs/adr/ADR-009-domain-model.md) | Domain model — Product / Catalog bounded context |
 | [ADR-010](docs/adr/ADR-010-indexer-design.md) | Indexer design — sequential worker, per-channel-locale indexes |
+| [ADR-011](docs/adr/ADR-011-pricing-pipeline.md) | Pricing pipeline — Kafka consumer, S3 landing, price-importer, append-only snapshots |
+| [ADR-012](docs/adr/ADR-012-inventory-pipeline.md) | Inventory pipeline — direct Postgres write, outbox, partial OpenSearch update |
 
 ### OpenAPI contract
 A complete OpenAPI 3.1 spec at [`api/openapi.yaml`](api/openapi.yaml) covering two sub-contexts:
@@ -48,14 +50,16 @@ A complete OpenAPI 3.1 spec at [`api/openapi.yaml`](api/openapi.yaml) covering t
 Commands return `202 Accepted` + HATEOAS links only (CQS). Queries return `200` + full resource. ETags are content-derived (SHA-256). 410 Gone is distinguished from 404 Not Found.
 
 ### Database schema
-Full PostgreSQL DDL in [`migrations/001_schema.sql`](migrations/001_schema.sql) with seed data in [`migrations/002_seed.sql`](migrations/002_seed.sql). Includes a `snapshots` table for the Athena import pipeline and `snapshot_id` on `products` and `variants` as a write-guard against stale imports.
+Full PostgreSQL DDL in [`migrations/001_schema.sql`](migrations/001_schema.sql) with seed data in [`migrations/002_seed.sql`](migrations/002_seed.sql). Pricing schema in [`migrations/003_pricing.sql`](migrations/003_pricing.sql). Includes `snapshots` and `price_snapshot_imports` as write-guards, `price_snapshots` as an append-only price ledger, and `v_current_prices` / `v_products_current` as resolution views.
 
 ### Infrastructure diagrams
 [`DIAGRAM.md`](DIAGRAM.md) contains Mermaid diagrams for:
-- System overview (Athena → S3 → Importer → Postgres → EventBridge → Indexer ECS Tasks → OpenSearch)
+- System overview (Athena + Kafka → S3 → Importer/price-importer → Postgres → EventBridge → Indexer ECS Tasks → OpenSearch)
 - Single-product GET flow (Bloom filter → Valkey → Postgres)
 - Mutation flow (optimistic locking + outbox)
 - Athena snapshot import pipeline
+- Pricing pipeline (Kafka → price-consumer → S3 → price-importer → Postgres → Indexer)
+- Inventory pipeline (Kafka → inventory-consumer → Postgres → outbox → partial OpenSearch update)
 - Indexer blue/green re-index per channel×locale
 - Observability pipeline
 
@@ -96,6 +100,12 @@ Migrations run automatically via `dbmate` before the app services start.
 
 **Athena snapshot import with a write-guard.** Products are imported from Athena-generated Parquet files on S3. Each import run is recorded as a `snapshot` row. Products and variants carry a `snapshot_id` FK; the upsert only overwrites a row when the incoming snapshot's `dumped_at` is strictly newer. Re-running the same dump is a no-op. API mutations never set `snapshot_id` and are never overwritten by an import.
 
+**Append-only pricing with a view-based resolution.** Prices are per product × channel × marketplace and are never updated in place — each import appends new rows to `price_snapshots`. The current price is resolved by the `v_current_prices` view using specificity ranking (channel+marketplace > channel > marketplace > global) and `effective_from` ordering. The view falls back to legacy `channel_products.price_override` and `variants.price` if no snapshot exists. The indexer and API query the view — resolution logic lives in SQL once, not in Go.
+
+**Kafka consumer lands to S3; price-importer is stateless.** The `price-consumer` ECS Service consumes the external `pricing.price-changed` Kafka topic and batches records to S3 as JSON. The `price-importer` ECS Task is triggered by S3 ObjectCreated events and handles both Kafka stream landings and Athena full-price dumps identically. Kafka offsets are committed only after the S3 write succeeds.
+
+**Inventory pipeline — direct write, no S3 landing.** The `inventory-consumer` ECS Service consumes `inventory.stock-changed` Kafka events and writes directly to Postgres in a single transaction: upsert `stock_levels` + outbox row. The `IS DISTINCT FROM` guard prevents spurious outbox events when the same level arrives twice. Stock changes trigger a partial OpenSearch `_update` on the affected product document(s) — not a full re-index — keeping propagation fast.
+
 **ECS Tasks triggered by EventBridge, not always-on consumers.** The importer and indexer only need to run when there is new data. EventBridge rules fire ECS Tasks on `s3:ObjectCreated` (importer) and `snapshot.imported` (indexer, one rule per channel×locale). No SQS queue, no visibility timeout tuning, no dead-letter queue management.
 
 **CQS on the API.** Mutating operations (POST, PUT, PATCH, DELETE) return `202 Accepted` with HATEOAS links only — no resource body. Queries (GET) return the full resource. This keeps the command and query paths cleanly separated and makes the API safe to retry.
@@ -107,6 +117,9 @@ Migrations run automatically via `dbmate` before the app services start.
 - A working HTTP server (the `cmd/api/main.go` wiring)
 - A working indexer binary (`cmd/indexer/main.go`)
 - A working importer binary (`cmd/importer/main.go`)
+- A working price-consumer binary (`cmd/price-consumer/main.go`) — Kafka client, S3 batch writer
+- A working price-importer binary (`cmd/price-importer/main.go`) — S3 JSON reader, price snapshot upsert
+- A working inventory-consumer binary (`cmd/inventory-consumer/main.go`) — Kafka client, direct Postgres upsert + outbox
 - OpenSearch document mapping and query construction
 - Bloom filter implementation
 - Outbox worker goroutine

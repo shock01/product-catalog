@@ -9,7 +9,11 @@ graph TD
     Client["Clients / API Gateway"]
     Athena["AWS Athena\n(scheduled query)"]
     S3[("S3\ns3://bucket/catalog/snapshots/\n{dumped_at}/products.parquet")]
-    EB_S3["EventBridge\nS3 rule"]
+    S3P[("S3\ns3://bucket/pricing/")]
+    KafkaP["External Kafka\npricing.price-changed"]
+    KafkaI["External Kafka\ninventory.stock-changed"]
+    EB_S3["EventBridge\nS3 rule (catalog)"]
+    EB_S3P["EventBridge\nS3 rule (pricing)"]
     EB_BUS["EventBridge\nbus: product-catalog"]
 
     subgraph Importer ["Importer (ECS Task)"]
@@ -17,11 +21,26 @@ graph TD
         SnapshotGuard["Snapshot Guard"]
     end
 
-    subgraph Indexers ["Indexer Tasks (ECS, one per channel×locale)"]
+    subgraph PriceConsumer ["price-consumer (ECS Service)"]
+        KPConsumer["Kafka Consumer"]
+        Batcher["S3 Batch Writer"]
+    end
+
+    subgraph PriceImporter ["price-importer (ECS Task)"]
+        S3PReader["S3 JSON Reader"]
+        PriceGuard["Price Snapshot Guard"]
+    end
+
+    subgraph InventoryConsumer ["inventory-consumer (ECS Service)"]
+        KIConsumer["Kafka Consumer"]
+        StockUpsert["Stock Upsert\n(last-write-wins)\n+ outbox row"]
+    end
+
+    subgraph Indexers ["Indexer Tasks (ECS, one per channel x locale)"]
         IDX_WEB_EN["indexer\nCHANNEL=web LOCALE=en-GB"]
         IDX_WEB_DE["indexer\nCHANNEL=web LOCALE=de-DE"]
         IDX_POS_EN["indexer\nCHANNEL=pos LOCALE=en-GB"]
-        IDX_DOT["... one per combination"]
+        IDX_DOT["... one per combination"]
     end
 
     subgraph API ["API Service (ECS Service)"]
@@ -30,7 +49,7 @@ graph TD
         OutboxWorker["Outbox Worker (goroutine)"]
     end
 
-    PG[("PostgreSQL\nproducts · variants · assets\nlocales · translations\nchannel_products · stock_levels\nsnapshots · outbox")]
+    PG[("PostgreSQL\nproducts · variants · assets\nlocales · translations\nchannel_products · stock_levels\nsnapshots · outbox\nprice_snapshots · price_snapshot_imports\nv_current_prices · v_products_current")]
     Valkey[("Valkey\nproduct:{id} TTL 5m")]
     OS[("OpenSearch\nproducts-web-en-gb\nproducts-web-de-de\nproducts-pos-en-gb · ...")]
 
@@ -41,24 +60,39 @@ graph TD
     SnapshotGuard -->|"UPSERT products/variants\n(snapshot guard)"| PG
     SnapshotGuard -->|"write outbox\nsnapshot.imported"| PG
 
+    KafkaP -->|"consume"| KPConsumer
+    KPConsumer --> Batcher
+    Batcher -->|"JSON lines batch\n(5 min or 1k records)"| S3P
+    Athena -->|"UNLOAD prices to JSON"| S3P
+    S3P -->|"s3:ObjectCreated"| EB_S3P
+    EB_S3P -->|"ECS RunTask"| PriceImporter
+    S3PReader --> PriceGuard
+    PriceGuard -->|"INSERT price_snapshots\n(effective_from guard)"| PG
+    PriceGuard -->|"write outbox\nprice.imported"| PG
+
+    KafkaI -->|"consume"| KIConsumer
+    KIConsumer --> StockUpsert
+    StockUpsert -->|"UPSERT stock_levels\n+ outbox row\n(single transaction)"| PG
+
     OutboxWorker -->|"poll outbox"| PG
     OutboxWorker -->|"PutEvents"| EB_BUS
 
-    EB_BUS -->|"rule per channel×locale\nECS RunTask"| Indexers
+    EB_BUS -->|"snapshot.imported or price.imported\nrule per channel x locale -> full re-index\nECS RunTask"| Indexers
+    EB_BUS -->|"stock.updated\npartial _update\nECS RunTask"| Indexers
 
-    IDX_WEB_EN -->|"batch read\n(eligible products)"| PG
-    IDX_WEB_EN -->|"bulk write\nalias swap"| OS
+    IDX_WEB_EN -->|"batch read\n(v_products_current\n+ v_current_prices)"| PG
+    IDX_WEB_EN -->|"bulk write or partial _update\nalias swap on full re-index"| OS
     IDX_WEB_DE -->|"batch read"| PG
-    IDX_WEB_DE -->|"bulk write\nalias swap"| OS
+    IDX_WEB_DE -->|"bulk write or partial _update"| OS
     IDX_POS_EN -->|"batch read"| PG
-    IDX_POS_EN -->|"bulk write\nalias swap"| OS
+    IDX_POS_EN -->|"bulk write or partial _update"| OS
 
     Client -->|HTTPS| Handler
     Handler -->|"POST/PUT/PATCH/DELETE\n(write + outbox row)"| PG
     Handler -->|"GET /{id}\nbloom check"| Bloom
-    Bloom -->|"may exist → cache lookup"| Valkey
+    Bloom -->|"may exist -> cache lookup"| Valkey
     Valkey -->|"cache miss"| PG
-    Handler -->|"GET /search\nchannel+locale → alias"| OS
+    Handler -->|"GET /search\nchannel+locale -> alias"| OS
     Handler -.->|"invalidate on write"| Valkey
 ```
 
@@ -142,7 +176,7 @@ sequenceDiagram
     IMP->>PG: INSERT INTO snapshots (s3_uri, dumped_at)\nstatus='processing'
 
     loop for each product row in file
-        IMP->>PG: INSERT INTO products ... ON CONFLICT (id) DO UPDATE\n  SET snapshot_id=$new, ...\n  WHERE snapshots.dumped_at > products→snapshot.dumped_at
+        IMP->>PG: INSERT INTO products ... ON CONFLICT (id) DO UPDATE\n  SET snapshot_id=$new, ...\n  WHERE snapshots.dumped_at > products->snapshot.dumped_at
         IMP->>PG: same guard for variants
     end
 
@@ -152,9 +186,78 @@ sequenceDiagram
     EB-->>SQS: fan-out to indexer queue
 ```
 
-> The snapshot guard (`WHERE snapshots.dumped_at > products→snapshot.dumped_at`) is evaluated in a single `UPDATE ... FROM snapshots` join, making it atomic per row. A re-run of the same dump is a no-op because `dumped_at` is equal, not greater.
+> The snapshot guard (`WHERE snapshots.dumped_at > products->snapshot.dumped_at`) is evaluated in a single `UPDATE ... FROM snapshots` join, making it atomic per row. A re-run of the same dump is a no-op because `dumped_at` is equal, not greater.
 
-## Indexer — Sequential Blue/Green Re-index per Channel×Locale
+## Pricing Pipeline
+
+```mermaid
+sequenceDiagram
+    participant K as External Kafka<br/>pricing.price-changed
+    participant PC as price-consumer<br/>(ECS Service)
+    participant S3 as S3
+    participant EB as EventBridge
+    participant PI as price-importer<br/>(ECS Task)
+    participant PG as PostgreSQL
+    participant OW as Outbox Worker
+    participant IDX as Indexer Tasks
+
+    note over K,PC: Path A — stream (near-real-time)
+    K->>PC: consume records
+    PC->>PC: accumulate batch<br/>(5 min or 1,000 records)
+    PC->>S3: write JSON lines<br/>pricing/stream/{date}/{hour}/{uuid}.json
+    PC->>K: commit offsets (after S3 write)
+
+    note over S3,IDX: Path B — Athena full import feeds same path from S3
+    S3->>EB: s3:ObjectCreated
+    EB->>PI: ECS RunTask<br/>S3_BUCKET, S3_KEY
+
+    PI->>PG: INSERT price_snapshot_imports<br/>status='processing'
+    loop for each price record
+        PI->>PG: INSERT INTO price_snapshots<br/>WHERE no newer effective_from exists<br/>for product x channel x marketplace
+    end
+    PI->>PG: UPDATE price_snapshot_imports<br/>status='completed'
+    PI->>PG: INSERT INTO outbox<br/>event_type='price.imported'
+
+    OW->>PG: poll outbox
+    OW->>EB: PutEvents price.imported
+    EB->>IDX: rule per channel x locale<br/>ECS RunTask (full re-index)
+    IDX->>PG: batch read via<br/>v_products_current + v_current_prices
+    IDX->>IDX: bulk write + alias swap
+```
+
+> The Kafka consumer (price-consumer) is the only always-on component in the pricing pipeline. It commits Kafka offsets only after the S3 write succeeds, ensuring at-least-once delivery. The price-importer's `effective_from` guard makes re-processing idempotent.
+
+## Inventory Pipeline
+
+```mermaid
+sequenceDiagram
+    participant K as External Kafka<br/>inventory.stock-changed
+    participant IC as inventory-consumer<br/>(ECS Service)
+    participant PG as PostgreSQL
+    participant OW as Outbox Worker
+    participant EB as EventBridge
+    participant IDX as Indexer Tasks
+    participant OS as OpenSearch
+
+    K->>IC: consume record<br/>{variant_id, warehouse_code, level}
+    IC->>PG: BEGIN\nUPSERT stock_levels (IS DISTINCT FROM guard)\nINSERT INTO outbox (stock.updated) -- only if level changed\nCOMMIT
+    IC->>K: commit Kafka offset
+
+    OW->>PG: poll outbox
+    OW->>EB: PutEvents stock.updated
+    EB->>IDX: rule per channel x locale<br/>ECS RunTask (partial update)
+
+    IDX->>PG: lookup product_id for variant\nrecompute aggregate stock status
+    alt product transitions to fully OOS
+        IDX->>OS: DELETE /{index}/_doc/{product_id}
+    else stock fields changed
+        IDX->>OS: POST /{index}/_update/{product_id}\n{stock fields only}
+    end
+```
+
+> No S3 landing for inventory — the `IS DISTINCT FROM` guard makes the upsert idempotent, so at-least-once Kafka delivery is safe without a replay buffer. Stock changes trigger a partial OpenSearch `_update` rather than a full re-index, keeping propagation fast (seconds, not minutes).
+
+## Indexer — Sequential Blue/Green Re-index per Channel x Locale
 
 ```mermaid
 sequenceDiagram
@@ -164,22 +267,22 @@ sequenceDiagram
     participant PG as PostgreSQL
     participant OS as OpenSearch
 
-    EB->>ECS: snapshot.imported event\n→ rule fires per channel×locale
+    EB->>ECS: snapshot.imported or price.imported\n-> rule fires per channel x locale
     ECS->>IDX: RunTask\nINDEX_CHANNEL=web\nINDEX_LOCALE=en-GB
 
     IDX->>OS: CREATE index products-web-en-gb-{timestamp}
 
     loop batches of 500 (keyset cursor)
-        IDX->>PG: SELECT eligible products\n(published, stock!=OOS, channel enabled)\nwith en-GB translations + web price overrides
+        IDX->>PG: SELECT eligible products\n(published, stock!=OOS, channel enabled)\nvia v_products_current + v_current_prices
         IDX->>OS: POST _bulk (500 docs)
     end
 
-    IDX->>OS: POST _aliases\n  remove: products-web-en-gb → old\n  add:    products-web-en-gb → new
+    IDX->>OS: POST _aliases\n  remove: products-web-en-gb -> old\n  add:    products-web-en-gb -> new
     IDX->>OS: DELETE old index
     IDX-->>ECS: exit 0
 ```
 
-> Each channel×locale task runs concurrently — they write to different indexes so there is no contention. A single sequential worker handles hundreds of thousands of products in 1–2 minutes; parallelising within one index would cause OpenSearch merge pressure and be slower overall. See ADR-010.
+> Each channel x locale task runs concurrently — they write to different indexes so there is no contention. A single sequential worker handles hundreds of thousands of products in 1–2 minutes; parallelising within one index would cause OpenSearch merge pressure and be slower overall. See ADR-010.
 
 ## Observability Pipeline
 
@@ -243,3 +346,5 @@ graph LR
 | ADR-007 | Kubernetes / ECS deployment |
 | ADR-008 | OpenTelemetry for tracing, metrics, and logging |
 | ADR-010 | Indexer design — sequential worker, per-channel-locale indexes, ECS Task trigger |
+| ADR-011 | Pricing pipeline — Kafka consumer, S3 landing, price-importer, append-only snapshots |
+| ADR-012 | Inventory pipeline — direct Postgres write, outbox, partial OpenSearch update |
