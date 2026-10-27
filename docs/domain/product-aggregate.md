@@ -12,7 +12,7 @@ The aggregate boundary is intentional: all mutations to variants, options, and c
 
 ```mermaid
 graph TD
-    PR["<b>Product</b> (Aggregate Root)\n─────────────────\nid: UUID\nsnapshot_id: UUID\nstatus: ProductStatus\nversion: int\ncreated_at / updated_at / deleted_at"]
+    PR["<b>Product</b> (Aggregate Root)\n─────────────────\nid: UUID\nbrand_id: UUID\nsnapshot_id: UUID\nstatus: ProductStatus\nversion: int\ncreated_at / updated_at / deleted_at"]
 
     OPT["<b>Option</b>\n─────────────────\nid: UUID\ncode: string  e.g. 'size', 'colour'\nsort_order: int"]
 
@@ -34,7 +34,13 @@ graph TD
 
     CP["<b>ChannelProduct</b>\n─────────────────\nchannel_id: UUID\nenabled: bool\nprice_override: numeric  ← legacy fallback\ncurrency: string\nversion: int"]
 
-    PSI["<b>PriceSnapshotImport</b>\n─────────────────\nid: UUID\ns3_uri: string\ndumped_at: timestamptz\nstatus: string"]
+    BR["<b>Brand</b>\n─────────────────\nid: UUID\ncode: string  e.g. 'nike'\nactive: bool"]
+
+    TX["<b>Taxonomy</b>\n─────────────────\nid: integer  numeric node ID\nparent_id: integer?\ncode: string  e.g. 'tops'\ndepth: 1..4\nactive: bool"]
+
+    TXT["<b>TaxonomyTranslation</b>\n─────────────────\ntaxonomy_id: integer\nlocale: string\nname: string  e.g. 'Tops', 'Oberteile'"]
+
+    PT["<b>ProductTaxonomy</b>\n─────────────────\nproduct_id: UUID\ntaxonomy_id: integer\npath: integer[]  e.g. {1,120,780}"]\n─────────────────\nid: UUID\ns3_uri: string\ndumped_at: timestamptz\nstatus: string"]
 
     PS["<b>PriceSnapshot</b>\n─────────────────\nid: UUID\nproduct_id: UUID\nchannel_id: UUID?\nmarketplace_id: UUID?\namount: numeric\ncurrency: string\nprice_snapshot_import_id: UUID\neffective_from: timestamptz"]
 
@@ -56,6 +62,10 @@ graph TD
     PR --> CP
     PR --> MP
     VAR --> SL
+    PR --> BR
+    PR --> PT
+    PT --> TX
+    TX --> TXT
     PR --> PS
     PSI --> PS
 ```
@@ -118,6 +128,10 @@ graph LR
 | `Asset` | URL, type, sort order; scoped to product or a specific variant | Storage / CDN |
 | `ProductTranslation` | `title`, `slug`, `description`, `short_description`, `meta_title`, `meta_description` per locale | Variant-level copy |
 | `VariantTranslation` | Localised `title` and `description` per locale | Option labels |
+| `Brand` | `code` — locale-neutral brand identifier | Display name — not modelled yet |
+| `Taxonomy` | Numeric node ID, `parent_id`, `code`, `depth` (1–4) | Product data — Taxonomy is a reference table synced from an external service |
+| `TaxonomyTranslation` | Localised node name per locale (e.g. "Tops", "Oberteile") | — |
+| `ProductTaxonomy` | The assignment of a product to a taxonomy node, including the full ancestor path as `integer[]` (e.g. `{1, 120, 780}`) | Path computation — written at import/API time, not computed at query time |
 | `ChannelProduct` | Per-channel enabled flag and legacy `price_override` (fallback only) | Channel config — Channel is owned by the Channel Service |
 | `PriceSnapshotImport` | S3 URI, `dumped_at` timestamp, import status — write-guard for price imports | Price data — PriceSnapshotImport is a write-guard, not a data owner |
 | `PriceSnapshot` | Append-only price record per product × channel × marketplace with `effective_from` | Historical prices are never deleted — archive via cleanup job |
@@ -147,6 +161,7 @@ The aggregate root enforces these invariants on every mutation:
 erDiagram
     PRODUCT {
         uuid id PK
+        uuid brand_id FK
         uuid snapshot_id FK
         string status
         int version
@@ -243,7 +258,28 @@ erDiagram
         int row_count
         string status
     }
-    PRICE_SNAPSHOT_IMPORT {
+    BRAND {
+        uuid id PK
+        string code
+        bool active
+    }
+    TAXONOMY {
+        int id PK
+        int parent_id FK
+        string code
+        int depth
+        bool active
+    }
+    TAXONOMY_TRANSLATION {
+        int taxonomy_id FK
+        string locale_code FK
+        string name
+    }
+    PRODUCT_TAXONOMY {
+        uuid product_id FK
+        int taxonomy_id FK
+        int[] path
+    }
         uuid id PK
         string s3_uri
         timestamptz dumped_at
@@ -277,6 +313,11 @@ erDiagram
     PRODUCT ||--o{ CHANNEL_PRODUCT : "listed in"
     PRODUCT ||--o{ MARKETPLACE_PRODUCT : "listed on"
     VARIANT ||--o{ STOCK_LEVEL : "stocked at"
+    PRODUCT }o--|| BRAND : "belongs to"
+    PRODUCT ||--o{ PRODUCT_TAXONOMY : "assigned to"
+    PRODUCT_TAXONOMY }o--|| TAXONOMY : "references"
+    TAXONOMY ||--o{ TAXONOMY_TRANSLATION : "translated by"
+    TAXONOMY ||--o{ TAXONOMY : "parent of"
     SNAPSHOT ||--o{ PRODUCT : "last imported by"
     SNAPSHOT ||--o{ VARIANT : "last imported by"
     PRICE_SNAPSHOT_IMPORT ||--o{ PRICE_SNAPSHOT : "write-guard for"

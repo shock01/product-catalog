@@ -102,9 +102,28 @@ func (h *ProductHandler) DeleteProduct(ctx context.Context, req gen.DeleteProduc
 // catalog/search
 // ---------------------------------------------------------------------------
 
+func (h *ProductHandler) ListProducts(_ context.Context, _ gen.ListProductsRequestObject) (gen.ListProductsResponseObject, error) {
+	// TODO: delegate to Postgres list use-case
+	return gen.ListProducts200JSONResponse(gen.ProductListResponse{
+		Data:  []gen.Product{},
+		Pages: gen.Pages{Total: 0, TotalPages: 0, Page: 1, PageSize: 20},
+	}), nil
+}
+
 func (h *ProductHandler) SearchProducts(_ context.Context, _ gen.SearchProductsRequestObject) (gen.SearchProductsResponseObject, error) {
 	// TODO: delegate to OpenSearch query use-case
-	return gen.SearchProducts200JSONResponse(gen.SearchResponse{Meta: gen.PaginationMeta{Total: 0}}), nil
+	return gen.SearchProducts200JSONResponse(gen.SearchResponse{
+		Data:  []gen.ProductSummary{},
+		Pages: gen.Pages{Total: 0, TotalPages: 0, Page: 1, PageSize: 20},
+	}), nil
+}
+
+func (h *ProductHandler) QueryProducts(_ context.Context, _ gen.QueryProductsRequestObject) (gen.QueryProductsResponseObject, error) {
+	// TODO: delegate to OpenSearch query use-case (structured body)
+	return gen.QueryProducts200JSONResponse(gen.SearchResponse{
+		Data:  []gen.ProductSummary{},
+		Pages: gen.Pages{Total: 0, TotalPages: 0, Page: 1, PageSize: 20},
+	}), nil
 }
 
 // ---------------------------------------------------------------------------

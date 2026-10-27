@@ -83,6 +83,7 @@ func (e LinkMethod) Valid() bool {
 // Defines values for LinkRel.
 const (
 	Delete  LinkRel = "delete"
+	Query   LinkRel = "query"
 	Replace LinkRel = "replace"
 	Search  LinkRel = "search"
 	Self    LinkRel = "self"
@@ -93,6 +94,8 @@ const (
 func (e LinkRel) Valid() bool {
 	switch e {
 	case Delete:
+		return true
+	case Query:
 		return true
 	case Replace:
 		return true
@@ -131,6 +134,45 @@ func (e ProductStatus) Valid() bool {
 	}
 }
 
+// Defines values for SearchQueryRequestOrder.
+const (
+	SearchQueryRequestOrderAsc  SearchQueryRequestOrder = "asc"
+	SearchQueryRequestOrderDesc SearchQueryRequestOrder = "desc"
+)
+
+// Valid indicates whether the value is a known member of the SearchQueryRequestOrder enum.
+func (e SearchQueryRequestOrder) Valid() bool {
+	switch e {
+	case SearchQueryRequestOrderAsc:
+		return true
+	case SearchQueryRequestOrderDesc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SearchQueryRequestSort.
+const (
+	CreatedAt SearchQueryRequestSort = "created_at"
+	Price     SearchQueryRequestSort = "price"
+	Title     SearchQueryRequestSort = "title"
+)
+
+// Valid indicates whether the value is a known member of the SearchQueryRequestSort enum.
+func (e SearchQueryRequestSort) Valid() bool {
+	switch e {
+	case CreatedAt:
+		return true
+	case Price:
+		return true
+	case Title:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StockStatus.
 const (
 	INSTOCK StockStatus = "IN_STOCK"
@@ -146,6 +188,60 @@ func (e StockStatus) Valid() bool {
 	case LOW:
 		return true
 	case OOS:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrderParam.
+const (
+	OrderParamAsc  OrderParam = "asc"
+	OrderParamDesc OrderParam = "desc"
+)
+
+// Valid indicates whether the value is a known member of the OrderParam enum.
+func (e OrderParam) Valid() bool {
+	switch e {
+	case OrderParamAsc:
+		return true
+	case OrderParamDesc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListProductsParamsOrder.
+const (
+	ListProductsParamsOrderAsc  ListProductsParamsOrder = "asc"
+	ListProductsParamsOrderDesc ListProductsParamsOrder = "desc"
+)
+
+// Valid indicates whether the value is a known member of the ListProductsParamsOrder enum.
+func (e ListProductsParamsOrder) Valid() bool {
+	switch e {
+	case ListProductsParamsOrderAsc:
+		return true
+	case ListProductsParamsOrderDesc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SearchProductsParamsOrder.
+const (
+	SearchProductsParamsOrderAsc  SearchProductsParamsOrder = "asc"
+	SearchProductsParamsOrderDesc SearchProductsParamsOrder = "desc"
+)
+
+// Valid indicates whether the value is a known member of the SearchProductsParamsOrder enum.
+func (e SearchProductsParamsOrder) Valid() bool {
+	switch e {
+	case SearchProductsParamsOrderAsc:
+		return true
+	case SearchProductsParamsOrderDesc:
 		return true
 	default:
 		return false
@@ -202,12 +298,18 @@ type CommandResponse struct {
 
 // CreateProductRequest defines model for CreateProductRequest.
 type CreateProductRequest struct {
-	Assets              *[]AssetInput         `json:"assets,omitempty"`
+	Assets *[]AssetInput `json:"assets,omitempty"`
+
+	// BrandId Brand this product belongs to. Required.
+	BrandId             openapi_types.UUID    `json:"brand_id"`
 	ChannelListings     *[]ChannelListing     `json:"channel_listings,omitempty"`
 	MarketplaceListings *[]MarketplaceListing `json:"marketplace_listings,omitempty"`
 
 	// Options Omit for a single-variant product.
-	Options      *[]OptionInput       `json:"options,omitempty"`
+	Options *[]OptionInput `json:"options,omitempty"`
+
+	// Taxonomies Taxonomy assignments. Provide the full ancestor path for each node.
+	Taxonomies   *[]TaxonomyNode      `json:"taxonomies,omitempty"`
 	Translations []ProductTranslation `json:"translations"`
 	Variants     []VariantInput       `json:"variants"`
 }
@@ -300,23 +402,31 @@ type OptionValueTranslation struct {
 	Value string `json:"value"`
 }
 
-// PaginationMeta defines model for PaginationMeta.
-type PaginationMeta struct {
-	// NextCursor Opaque cursor for the next page. Absent when no further results exist.
-	NextCursor *string `json:"next_cursor,omitempty"`
+// Pages Pagination envelope included in all paginated responses.
+type Pages struct {
+	// Page Current page number (1-based).
+	Page int `json:"page"`
 
-	// Total Total number of matching documents in OpenSearch.
+	// PageSize Effective limit used for this response.
+	PageSize int `json:"page_size"`
+
+	// Total Total number of matching records or documents.
 	Total int `json:"total"`
+
+	// TotalPages ceil(total / page_size). 0 when total is 0.
+	TotalPages int `json:"total_pages"`
 }
 
 // PatchProductRequest Partial update. Only provided fields are mutated.
 // To remove all items from an array, pass an explicit empty array `[]`.
 type PatchProductRequest struct {
+	BrandId             *openapi_types.UUID   `json:"brand_id,omitempty"`
 	ChannelListings     *[]ChannelListing     `json:"channel_listings,omitempty"`
 	MarketplaceListings *[]MarketplaceListing `json:"marketplace_listings,omitempty"`
 
 	// Status Lifecycle status of the product.
 	Status       *ProductStatus        `json:"status,omitempty"`
+	Taxonomies   *[]TaxonomyNode       `json:"taxonomies,omitempty"`
 	Translations *[]ProductTranslation `json:"translations,omitempty"`
 	Variants     *[]VariantInput       `json:"variants,omitempty"`
 }
@@ -324,7 +434,10 @@ type PatchProductRequest struct {
 // Product defines model for Product.
 type Product struct {
 	// Assets Product-scoped assets (scope=product).
-	Assets              *[]Asset              `json:"assets,omitempty"`
+	Assets *[]Asset `json:"assets,omitempty"`
+
+	// BrandId Reference to the brand this product belongs to. All products must have a brand.
+	BrandId             openapi_types.UUID    `json:"brand_id"`
 	ChannelListings     []ChannelListing      `json:"channel_listings"`
 	CreatedAt           *time.Time            `json:"created_at,omitempty"`
 	Id                  openapi_types.UUID    `json:"id"`
@@ -334,13 +447,24 @@ type Product struct {
 	Options []Option `json:"options"`
 
 	// Status Lifecycle status of the product.
-	Status       ProductStatus        `json:"status"`
+	Status ProductStatus `json:"status"`
+
+	// Taxonomies Taxonomy assignments. A product may belong to multiple nodes.
+	Taxonomies   *[]TaxonomyNode      `json:"taxonomies,omitempty"`
 	Translations []ProductTranslation `json:"translations"`
 	UpdatedAt    *time.Time           `json:"updated_at,omitempty"`
 	Variants     []Variant            `json:"variants"`
 
 	// Version Optimistic lock version. Use as the value of the `If-Match` header on mutations.
 	Version *int `json:"version,omitempty"`
+}
+
+// ProductListResponse defines model for ProductListResponse.
+type ProductListResponse struct {
+	Data []Product `json:"data"`
+
+	// Pages Pagination envelope included in all paginated responses.
+	Pages Pages `json:"pages"`
 }
 
 // ProductResponse defines model for ProductResponse.
@@ -360,6 +484,7 @@ type ProductStatus string
 // Sourced from OpenSearch; reflects the locale and channel requested.
 type ProductSummary struct {
 	Assets           *[]Asset           `json:"assets,omitempty"`
+	BrandId          openapi_types.UUID `json:"brand_id"`
 	Id               openapi_types.UUID `json:"id"`
 	ShortDescription *string            `json:"short_description,omitempty"`
 
@@ -367,7 +492,8 @@ type ProductSummary struct {
 	Slug string `json:"slug"`
 
 	// Status Lifecycle status of the product.
-	Status ProductStatus `json:"status"`
+	Status     ProductStatus   `json:"status"`
+	Taxonomies *[]TaxonomyNode `json:"taxonomies,omitempty"`
 
 	// Title Localised title for the requested locale.
 	Title    string           `json:"title"`
@@ -389,10 +515,59 @@ type ProductTranslation struct {
 	Title string `json:"title"`
 }
 
+// SearchQueryRequest Body-based search for clients that need structured filter logic or
+// multiple values per filter field. Response schema is identical to
+// GET /catalog/search/v1.
+type SearchQueryRequest struct {
+	// Channel Channel code.
+	Channel *string `json:"channel,omitempty"`
+	Filter  *struct {
+		// Brand OR-matched brand codes.
+		Brand *[]string `json:"brand,omitempty"`
+
+		// Category OR-matched category codes.
+		Category *[]string `json:"category,omitempty"`
+
+		// MaxPrice Maximum price (inclusive).
+		MaxPrice *float32 `json:"max_price,omitempty"`
+
+		// MinPrice Minimum price (inclusive).
+		MinPrice *float32 `json:"min_price,omitempty"`
+
+		// StockStatus Textual stock availability level. The Catalog never stores exact
+		// quantities — those are owned by the Stock Service.
+		StockStatus *StockStatus `json:"stock_status,omitempty"`
+
+		// Tag OR-matched tag codes.
+		Tag *[]string `json:"tag,omitempty"`
+
+		// Taxonomy OR-matched taxonomy paths (e.g. `clothing/tops`).
+		Taxonomy *[]string `json:"taxonomy,omitempty"`
+	} `json:"filter,omitempty"`
+	Limit *int `json:"limit,omitempty"`
+
+	// Locale BCP-47 locale code.
+	Locale *string                  `json:"locale,omitempty"`
+	Offset *int                     `json:"offset,omitempty"`
+	Order  *SearchQueryRequestOrder `json:"order,omitempty"`
+
+	// Q Full-text search query.
+	Q    *string                 `json:"q,omitempty"`
+	Sort *SearchQueryRequestSort `json:"sort,omitempty"`
+}
+
+// SearchQueryRequestOrder defines model for SearchQueryRequest.Order.
+type SearchQueryRequestOrder string
+
+// SearchQueryRequestSort defines model for SearchQueryRequest.Sort.
+type SearchQueryRequestSort string
+
 // SearchResponse defines model for SearchResponse.
 type SearchResponse struct {
 	Data []ProductSummary `json:"data"`
-	Meta PaginationMeta   `json:"meta"`
+
+	// Pages Pagination envelope included in all paginated responses.
+	Pages Pages `json:"pages"`
 }
 
 // SingleMeta defines model for SingleMeta.
@@ -419,16 +594,31 @@ type StockLevel struct {
 // quantities — those are owned by the Stock Service.
 type StockStatus string
 
+// TaxonomyNode Assignment of a product to a taxonomy node. The full ancestor chain
+// is stored explicitly as an array of numeric node IDs, written at
+// import/API time (e.g. [1, 120, 780] where 780 is the leaf).
+type TaxonomyNode struct {
+	// Path Full ancestor chain including the leaf, root-first.
+	Path []int `json:"path"`
+
+	// TaxonomyId Numeric ID of the leaf taxonomy node.
+	TaxonomyId int `json:"taxonomy_id"`
+}
+
 // UpdateProductRequest Full replacement of the product aggregate. All fields are re-evaluated.
 // Omitted arrays (e.g. `marketplace_listings`) are left unchanged.
 type UpdateProductRequest struct {
-	Assets              *[]AssetInput         `json:"assets,omitempty"`
+	Assets *[]AssetInput `json:"assets,omitempty"`
+
+	// BrandId Brand this product belongs to.
+	BrandId             *openapi_types.UUID   `json:"brand_id,omitempty"`
 	ChannelListings     *[]ChannelListing     `json:"channel_listings,omitempty"`
 	MarketplaceListings *[]MarketplaceListing `json:"marketplace_listings,omitempty"`
 	Options             *[]OptionInput        `json:"options,omitempty"`
 
 	// Status Lifecycle status of the product.
 	Status       *ProductStatus        `json:"status,omitempty"`
+	Taxonomies   *[]TaxonomyNode       `json:"taxonomies,omitempty"`
 	Translations *[]ProductTranslation `json:"translations,omitempty"`
 	Variants     *[]VariantInput       `json:"variants,omitempty"`
 }
@@ -500,9 +690,6 @@ type VariantTranslation struct {
 // ChannelParam defines model for ChannelParam.
 type ChannelParam = string
 
-// CursorParam defines model for CursorParam.
-type CursorParam = string
-
 // IfMatch defines model for IfMatch.
 type IfMatch = string
 
@@ -512,8 +699,17 @@ type LimitParam = int
 // LocaleParam defines model for LocaleParam.
 type LocaleParam = string
 
+// OffsetParam defines model for OffsetParam.
+type OffsetParam = int
+
+// OrderParam defines model for OrderParam.
+type OrderParam string
+
 // ProductId defines model for ProductId.
 type ProductId = openapi_types.UUID
+
+// SortParam defines model for SortParam.
+type SortParam = string
 
 // BadRequest defines model for BadRequest.
 type BadRequest = ErrorResponse
@@ -532,6 +728,33 @@ type UnprocessableEntity = ErrorResponse
 
 // VersionConflict defines model for VersionConflict.
 type VersionConflict = ErrorResponse
+
+// ListProductsParams defines parameters for ListProducts.
+type ListProductsParams struct {
+	// Limit Maximum number of results per page. Default 20, max 100.
+	Limit *LimitParam `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Zero-based index of the first result. Default 0.
+	Offset *OffsetParam `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// Sort Field to sort by. Allowed values are endpoint-specific.
+	Sort *SortParam `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Order Sort direction.
+	Order *ListProductsParamsOrder `form:"order,omitempty" json:"order,omitempty"`
+
+	// Locale BCP-47 locale code used to select the translation to return (e.g. `en-GB`).
+	Locale *LocaleParam `form:"locale,omitempty" json:"locale,omitempty"`
+
+	// Channel Channel code to filter by (e.g. `web`, `pos`).
+	Channel *ChannelParam `form:"channel,omitempty" json:"channel,omitempty"`
+
+	// Status Filter by product status.
+	Status *ProductStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// ListProductsParamsOrder defines parameters for ListProducts.
+type ListProductsParamsOrder string
 
 // DeleteProductParams defines parameters for DeleteProduct.
 type DeleteProductParams struct {
@@ -577,17 +800,34 @@ type SearchProductsParams struct {
 	// Channel Channel code to filter by (e.g. `web`, `pos`).
 	Channel *ChannelParam `form:"channel,omitempty" json:"channel,omitempty"`
 
-	// Cursor Opaque pagination cursor returned by a previous response.
-	Cursor *CursorParam `form:"cursor,omitempty" json:"cursor,omitempty"`
-
-	// Limit Maximum number of results to return. Default 20, max 100.
+	// Limit Maximum number of results per page. Default 20, max 100.
 	Limit *LimitParam `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Q Full-text search query.
+	// Offset Zero-based index of the first result. Default 0.
+	Offset *OffsetParam `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// Sort Field to sort by. Allowed values are endpoint-specific.
+	Sort *SortParam `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Order Sort direction.
+	Order *SearchProductsParamsOrder `form:"order,omitempty" json:"order,omitempty"`
+
+	// Q Full-text search query. Matched against title, description, and
+	// short_description in the requested locale. Combined with filters
+	// using AND.
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 
-	// Category Filter by category code.
+	// Category Filter by category code (exact match).
 	Category *string `form:"category,omitempty" json:"category,omitempty"`
+
+	// Brand Filter by brand code (exact match).
+	Brand *string `form:"brand,omitempty" json:"brand,omitempty"`
+
+	// Tag Filter by tag code (exact match). Repeat for multiple tags (OR logic).
+	Tag *string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Taxonomy Filter by taxonomy path (exact match, e.g. `clothing/tops`).
+	Taxonomy *string `form:"taxonomy,omitempty" json:"taxonomy,omitempty"`
 
 	// MinPrice Minimum variant price (inclusive).
 	MinPrice *float32 `form:"min_price,omitempty" json:"min_price,omitempty"`
@@ -595,9 +835,12 @@ type SearchProductsParams struct {
 	// MaxPrice Maximum variant price (inclusive).
 	MaxPrice *float32 `form:"max_price,omitempty" json:"max_price,omitempty"`
 
-	// StockStatus Filter by stock status. Defaults to excluding OOS variants.
+	// StockStatus Filter by stock status.
 	StockStatus *StockStatus `form:"stock_status,omitempty" json:"stock_status,omitempty"`
 }
+
+// SearchProductsParamsOrder defines parameters for SearchProducts.
+type SearchProductsParamsOrder string
 
 // CreateProductJSONRequestBody defines body for CreateProduct for application/json ContentType.
 type CreateProductJSONRequestBody = CreateProductRequest
@@ -608,8 +851,14 @@ type UpdateProductJSONRequestBody = PatchProductRequest
 // ReplaceProductJSONRequestBody defines body for ReplaceProduct for application/json ContentType.
 type ReplaceProductJSONRequestBody = UpdateProductRequest
 
+// QueryProductsJSONRequestBody defines body for QueryProducts for application/json ContentType.
+type QueryProductsJSONRequestBody = SearchQueryRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListProducts List products
+	// (GET /catalog/product/v1)
+	ListProducts(w http.ResponseWriter, r *http.Request, params ListProductsParams)
 	// CreateProduct Create a product
 	// (POST /catalog/product/v1)
 	CreateProduct(w http.ResponseWriter, r *http.Request)
@@ -628,6 +877,9 @@ type ServerInterface interface {
 	// SearchProducts Search and list products
 	// (GET /catalog/search/v1)
 	SearchProducts(w http.ResponseWriter, r *http.Request, params SearchProductsParams)
+	// QueryProducts Granular product search
+	// (POST /catalog/search/v1/query)
+	QueryProducts(w http.ResponseWriter, r *http.Request)
 	// HealthLiveness Liveness probe
 	// (GET /healthz)
 	HealthLiveness(w http.ResponseWriter, r *http.Request)
@@ -639,6 +891,12 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// ListProducts List products
+// (GET /catalog/product/v1)
+func (_ Unimplemented) ListProducts(w http.ResponseWriter, r *http.Request, params ListProductsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // CreateProduct Create a product
 // (POST /catalog/product/v1)
@@ -676,6 +934,12 @@ func (_ Unimplemented) SearchProducts(w http.ResponseWriter, r *http.Request, pa
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// QueryProducts Granular product search
+// (POST /catalog/search/v1/query)
+func (_ Unimplemented) QueryProducts(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // HealthLiveness Liveness probe
 // (GET /healthz)
 func (_ Unimplemented) HealthLiveness(w http.ResponseWriter, r *http.Request) {
@@ -696,6 +960,117 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListProducts operation middleware
+func (siw *ServerInterfaceWrapper) ListProducts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListProductsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sort" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sort", r.URL.Query(), &params.Sort, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sort"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sort", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "order" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "order", r.URL.Query(), &params.Order, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "order"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "order", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "locale" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "locale", r.URL.Query(), &params.Locale, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "locale"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "locale", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "channel" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "channel", r.URL.Query(), &params.Channel, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "channel"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "channel", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProducts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // CreateProduct operation middleware
 func (siw *ServerInterfaceWrapper) CreateProduct(w http.ResponseWriter, r *http.Request) {
@@ -963,19 +1338,6 @@ func (siw *ServerInterfaceWrapper) SearchProducts(w http.ResponseWriter, r *http
 		return
 	}
 
-	// ------------- Optional query parameter "cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
-		}
-		return
-	}
-
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -985,6 +1347,45 @@ func (siw *ServerInterfaceWrapper) SearchProducts(w http.ResponseWriter, r *http
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sort" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sort", r.URL.Query(), &params.Sort, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sort"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sort", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "order" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "order", r.URL.Query(), &params.Order, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "order"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "order", Err: err})
 		}
 		return
 	}
@@ -1011,6 +1412,45 @@ func (siw *ServerInterfaceWrapper) SearchProducts(w http.ResponseWriter, r *http
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "category"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "category", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "brand" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "brand", r.URL.Query(), &params.Brand, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "brand"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "brand", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "tag" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tag"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tag", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "taxonomy" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "taxonomy", r.URL.Query(), &params.Taxonomy, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "taxonomy"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taxonomy", Err: err})
 		}
 		return
 	}
@@ -1056,6 +1496,20 @@ func (siw *ServerInterfaceWrapper) SearchProducts(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SearchProducts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// QueryProducts operation middleware
+func (siw *ServerInterfaceWrapper) QueryProducts(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.QueryProducts(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1207,6 +1661,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/catalog/product/v1", wrapper.ListProducts)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/catalog/product/v1", wrapper.CreateProduct)
 	})
 	r.Group(func(r chi.Router) {
@@ -1223,6 +1680,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/catalog/search/v1", wrapper.SearchProducts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/catalog/search/v1/query", wrapper.QueryProducts)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/healthz", wrapper.HealthLiveness)
@@ -1245,6 +1705,42 @@ type NotFoundJSONResponse ErrorResponse
 type UnprocessableEntityJSONResponse ErrorResponse
 
 type VersionConflictJSONResponse ErrorResponse
+
+type ListProductsRequestObject struct {
+	Params ListProductsParams
+}
+
+type ListProductsResponseObject interface {
+	VisitListProductsResponse(w http.ResponseWriter) error
+}
+
+type ListProducts200JSONResponse ProductListResponse
+
+func (response ListProducts200JSONResponse) VisitListProductsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProducts400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListProducts400JSONResponse) VisitListProductsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type CreateProductRequestObject struct {
 	Body *CreateProductJSONRequestBody
@@ -1728,6 +2224,42 @@ func (response SearchProducts400JSONResponse) VisitSearchProductsResponse(w http
 	return err
 }
 
+type QueryProductsRequestObject struct {
+	Body *QueryProductsJSONRequestBody
+}
+
+type QueryProductsResponseObject interface {
+	VisitQueryProductsResponse(w http.ResponseWriter) error
+}
+
+type QueryProducts200JSONResponse SearchResponse
+
+func (response QueryProducts200JSONResponse) VisitQueryProductsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type QueryProducts400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response QueryProducts400JSONResponse) VisitQueryProductsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type HealthLivenessRequestObject struct {
 }
 
@@ -1768,6 +2300,9 @@ func (response HealthReadiness503Response) VisitHealthReadinessResponse(w http.R
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ListProducts List products
+	// (GET /catalog/product/v1)
+	ListProducts(ctx context.Context, request ListProductsRequestObject) (ListProductsResponseObject, error)
 	// CreateProduct Create a product
 	// (POST /catalog/product/v1)
 	CreateProduct(ctx context.Context, request CreateProductRequestObject) (CreateProductResponseObject, error)
@@ -1786,6 +2321,9 @@ type StrictServerInterface interface {
 	// SearchProducts Search and list products
 	// (GET /catalog/search/v1)
 	SearchProducts(ctx context.Context, request SearchProductsRequestObject) (SearchProductsResponseObject, error)
+	// QueryProducts Granular product search
+	// (POST /catalog/search/v1/query)
+	QueryProducts(ctx context.Context, request QueryProductsRequestObject) (QueryProductsResponseObject, error)
 	// HealthLiveness Liveness probe
 	// (GET /healthz)
 	HealthLiveness(ctx context.Context, request HealthLivenessRequestObject) (HealthLivenessResponseObject, error)
@@ -1831,6 +2369,32 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListProducts operation middleware
+func (sh *strictHandler) ListProducts(w http.ResponseWriter, r *http.Request, params ListProductsParams) {
+	var request ListProductsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListProducts(ctx, request.(ListProductsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListProducts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListProductsResponseObject); ok {
+		if err := validResponse.VisitListProductsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // CreateProduct operation middleware
@@ -2005,6 +2569,37 @@ func (sh *strictHandler) SearchProducts(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SearchProductsResponseObject); ok {
 		if err := validResponse.VisitSearchProductsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// QueryProducts operation middleware
+func (sh *strictHandler) QueryProducts(w http.ResponseWriter, r *http.Request) {
+	var request QueryProductsRequestObject
+
+	var body QueryProductsJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.QueryProducts(ctx, request.(QueryProductsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "QueryProducts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(QueryProductsResponseObject); ok {
+		if err := validResponse.VisitQueryProductsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

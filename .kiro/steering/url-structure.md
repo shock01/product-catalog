@@ -31,6 +31,7 @@ Owns all mutations and single-resource reads for the Product aggregate.
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/catalog/product/v1` | List products with filters, sort, and pagination |
 | `POST` | `/catalog/product/v1` | Create a product |
 | `GET` | `/catalog/product/v1/{id}` | Get a single product by ID |
 | `PUT` | `/catalog/product/v1/{id}` | Full update (requires `If-Match`) |
@@ -43,7 +44,8 @@ Read-only. Serves all list, filter, and full-text search operations.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/catalog/search/v1` | Search / list products with filters and pagination |
+| `GET` | `/catalog/search/v1` | Search / list products with filters, sort, and pagination |
+| `POST` | `/catalog/search/v1/query` | Granular search with structured filter body |
 
 ---
 
@@ -53,7 +55,7 @@ Contexts map directly to OAuth 2.0 scopes, allowing fine-grained access control 
 
 | Scope | Grants access to | Typical consumer |
 |---|---|---|
-| `catalog:product:read` | `GET /catalog/product/v1/{id}` — any product status | PIM, admin tooling, internal services |
+| `catalog:product:read` | `GET /catalog/product/v1` and `GET /catalog/product/v1/{id}` — any product status | PIM, admin tooling, internal services |
 | `catalog:product:write` | `POST`, `PUT`, `PATCH`, `DELETE` on `catalog/product/v1` | PIM, admin tooling, import pipelines |
 | *(none)* | `GET /catalog/search/v1` | Storefront, mobile app, public search UI |
 
@@ -119,6 +121,11 @@ paths:
   /catalog/search/v1:
     get:
       operationId: searchProducts
+      security: []  # public — no scope required
+
+  /catalog/search/v1/query:
+    post:
+      operationId: queryProducts
       security: []  # public — no scope required
 ```
 

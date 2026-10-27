@@ -166,24 +166,44 @@ components:
         type: string
         example: web
 
-    CursorParam:
-      name: cursor
-      in: query
-      required: false
-      description: Opaque pagination cursor returned by a previous response.
-      schema:
-        type: string
-
     LimitParam:
       name: limit
       in: query
       required: false
-      description: Maximum number of results to return. Default 20, max 100.
+      description: Maximum number of results per page. Default 20, max 100.
       schema:
         type: integer
         minimum: 1
         maximum: 100
         default: 20
+
+    OffsetParam:
+      name: offset
+      in: query
+      required: false
+      description: Zero-based index of the first result. Default 0.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+    SortParam:
+      name: sort
+      in: query
+      required: false
+      description: Field to sort by. Allowed values are endpoint-specific.
+      schema:
+        type: string
+
+    OrderParam:
+      name: order
+      in: query
+      required: false
+      description: Sort direction.
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
 
   # -------------------------------------------------------------------------
   # Schemas
@@ -298,6 +318,29 @@ components:
           minLength: 1
           maxLength: 100
           example: Extra Large
+
+    # -- Taxonomy -------------------------------------------------------------
+
+    TaxonomyNode:
+      type: object
+      required: [taxonomy_id, path]
+      description: |
+        Assignment of a product to a taxonomy node. The full ancestor chain
+        is stored explicitly as an array of numeric node IDs, written at
+        import/API time (e.g. [1, 120, 780] where 780 is the leaf).
+      properties:
+        taxonomy_id:
+          type: integer
+          description: Numeric ID of the leaf taxonomy node.
+          example: 780
+        path:
+          type: array
+          description: Full ancestor chain including the leaf, root-first.
+          minItems: 1
+          maxItems: 4
+          items:
+            type: integer
+          example: [1, 120, 780]
 
     # -- Options -------------------------------------------------------------
 
@@ -463,13 +506,22 @@ components:
 
     Product:
       type: object
-      required: [id, status, options, variants, translations, channel_listings, version, created_at, updated_at]
+      required: [id, brand_id, status, options, variants, translations, channel_listings, version, created_at, updated_at]
       properties:
         id:
           type: string
           format: uuid
+        brand_id:
+          type: string
+          format: uuid
+          description: Reference to the brand this product belongs to. All products must have a brand.
         status:
           $ref: '#/components/schemas/ProductStatus'
+        taxonomies:
+          type: array
+          description: Taxonomy assignments. A product may belong to multiple nodes.
+          items:
+            $ref: '#/components/schemas/TaxonomyNode'
         options:
           type: array
           description: Variation axes (e.g. Size, Colour). Empty for single-variant products.
@@ -515,8 +567,17 @@ components:
 
     CreateProductRequest:
       type: object
-      required: [variants, translations]
+      required: [brand_id, variants, translations]
       properties:
+        brand_id:
+          type: string
+          format: uuid
+          description: Brand this product belongs to. Required.
+        taxonomies:
+          type: array
+          description: Taxonomy assignments. Provide the full ancestor path for each node.
+          items:
+            $ref: '#/components/schemas/TaxonomyNode'
         options:
           type: array
           description: Omit for a single-variant product.
@@ -551,8 +612,16 @@ components:
         Full replacement of the product aggregate. All fields are re-evaluated.
         Omitted arrays (e.g. `marketplace_listings`) are left unchanged.
       properties:
+        brand_id:
+          type: string
+          format: uuid
+          description: Brand this product belongs to.
         status:
           $ref: '#/components/schemas/ProductStatus'
+        taxonomies:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxonomyNode'
         options:
           type: array
           items:
@@ -585,8 +654,15 @@ components:
         Partial update. Only provided fields are mutated.
         To remove all items from an array, pass an explicit empty array `[]`.
       properties:
+        brand_id:
+          type: string
+          format: uuid
         status:
           $ref: '#/components/schemas/ProductStatus'
+        taxonomies:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxonomyNode'
         translations:
           type: array
           items:
@@ -721,9 +797,12 @@ components:
       description: |
         Lightweight projection returned by the search context.
         Sourced from OpenSearch; reflects the locale and channel requested.
-      required: [id, status, title, slug, variants]
+      required: [id, brand_id, status, title, slug, variants]
       properties:
         id:
+          type: string
+          format: uuid
+        brand_id:
           type: string
           format: uuid
         status:
@@ -736,6 +815,10 @@ components:
           description: Localised slug for the requested locale.
         short_description:
           type: string
+        taxonomies:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxonomyNode'
         variants:
           type: array
           minItems: 1
@@ -816,16 +899,27 @@ components:
               href: /catalog/search/v1
               rel: search
 
+    ProductListResponse:
+      type: object
+      required: [data, pages]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        pages:
+          $ref: '#/components/schemas/Pages'
+
     SearchResponse:
       type: object
-      required: [data, meta]
+      required: [data, pages]
       properties:
         data:
           type: array
           items:
             $ref: '#/components/schemas/ProductSummary'
-        meta:
-          $ref: '#/components/schemas/PaginationMeta'
+        pages:
+          $ref: '#/components/schemas/Pages'
 
     SingleMeta:
       type: object
@@ -844,16 +938,27 @@ components:
             `If-Match` header on subsequent mutations.
           example: '"a3f8c2d1e4b09712"'
 
-    PaginationMeta:
+    Pages:
       type: object
-      required: [total]
+      required: [total, total_pages, page, page_size]
+      description: Pagination envelope included in all paginated responses.
       properties:
-        next_cursor:
-          type: string
-          description: Opaque cursor for the next page. Absent when no further results exist.
         total:
           type: integer
-          description: Total number of matching documents in OpenSearch.
+          description: Total number of matching records or documents.
+          example: 1842
+        total_pages:
+          type: integer
+          description: "ceil(total / page_size). 0 when total is 0."
+          example: 93
+        page:
+          type: integer
+          description: Current page number (1-based).
+          example: 3
+        page_size:
+          type: integer
+          description: Effective limit used for this response.
+          example: 20
 
     # -- Command response (CQS: commands return links only) -----------------
 
@@ -885,9 +990,85 @@ components:
       enum: [GET, POST, PUT, PATCH, DELETE]
       description: HTTP method for the link.
 
+    SearchQueryRequest:
+      type: object
+      description: |
+        Body-based search for clients that need structured filter logic or
+        multiple values per filter field. Response schema is identical to
+        GET /catalog/search/v1.
+      properties:
+        q:
+          type: string
+          description: Full-text search query.
+          example: classic t-shirt
+        locale:
+          type: string
+          description: BCP-47 locale code.
+          example: en-GB
+        channel:
+          type: string
+          description: Channel code.
+          example: web
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+        offset:
+          type: integer
+          minimum: 0
+          default: 0
+        sort:
+          type: string
+          enum: [price, title, created_at]
+          default: created_at
+        order:
+          type: string
+          enum: [asc, desc]
+          default: asc
+        filter:
+          type: object
+          properties:
+            brand:
+              type: array
+              items:
+                type: string
+              description: OR-matched brand codes.
+              example: [nike, adidas]
+            tag:
+              type: array
+              items:
+                type: string
+              description: OR-matched tag codes.
+              example: [sale, new]
+            taxonomy:
+              type: array
+              items:
+                type: string
+              description: OR-matched taxonomy paths (e.g. `clothing/tops`).
+              example: [clothing/tops]
+            category:
+              type: array
+              items:
+                type: string
+              description: OR-matched category codes.
+              example: [tops]
+            min_price:
+              type: number
+              format: decimal
+              description: Minimum price (inclusive).
+              example: 10.00
+            max_price:
+              type: number
+              format: decimal
+              description: Maximum price (inclusive).
+              example: 50.00
+            stock_status:
+              $ref: '#/components/schemas/StockStatus'
+
     LinkRel:
       type: string
-      enum: [self, update, replace, delete, search]
+      enum: [self, update, replace, delete, search, query]
       description: Relationship of the link to the current resource.
 
     Link:
@@ -930,6 +1111,39 @@ paths:
   # --------------------------------------------------------------------------
 
   /catalog/product/v1:
+    get:
+      operationId: listProducts
+      summary: List products
+      description: |
+        Returns a paginated list of products from PostgreSQL. Supports filtering
+        by status and channel, sorting, and limit/offset pagination.
+        Returns products of any status — internal endpoint.
+      tags: [catalog/product]
+      security:
+        - oauth2: [catalog:product:read]
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - $ref: '#/components/parameters/SortParam'
+        - $ref: '#/components/parameters/OrderParam'
+        - $ref: '#/components/parameters/LocaleParam'
+        - $ref: '#/components/parameters/ChannelParam'
+        - name: status
+          in: query
+          required: false
+          description: Filter by product status.
+          schema:
+            $ref: '#/components/schemas/ProductStatus'
+      responses:
+        "200":
+          description: Paginated list of products.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+
     post:
       operationId: createProduct
       summary: Create a product
@@ -1136,31 +1350,60 @@ paths:
       operationId: searchProducts
       summary: Search and list products
       description: |
-        Searches the OpenSearch index. Supports full-text search, faceted
-        filtering, and cursor-based pagination. Results are locale- and
-        channel-aware projections; only `published` products with at least
-        one non-OOS variant are returned.
+        Searches the OpenSearch index for the requested channel × locale.
+        Supports full-text search, faceted filtering, sorting, and limit/offset
+        pagination. Only `published` products with at least one non-OOS variant
+        are returned (enforced at index time).
+
+        For complex filter combinations (multiple values per field, structured
+        boolean logic) use `POST /catalog/search/v1/query` instead.
       tags: [catalog/search]
       security: []
       parameters:
         - $ref: '#/components/parameters/LocaleParam'
         - $ref: '#/components/parameters/ChannelParam'
-        - $ref: '#/components/parameters/CursorParam'
         - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - $ref: '#/components/parameters/SortParam'
+        - $ref: '#/components/parameters/OrderParam'
         - name: q
           in: query
           required: false
-          description: Full-text search query.
+          description: |
+            Full-text search query. Matched against title, description, and
+            short_description in the requested locale. Combined with filters
+            using AND.
           schema:
             type: string
             example: classic t-shirt
         - name: category
           in: query
           required: false
-          description: Filter by category code.
+          description: Filter by category code (exact match).
           schema:
             type: string
             example: tops
+        - name: brand
+          in: query
+          required: false
+          description: Filter by brand code (exact match).
+          schema:
+            type: string
+            example: nike
+        - name: tag
+          in: query
+          required: false
+          description: Filter by tag code (exact match). Repeat for multiple tags (OR logic).
+          schema:
+            type: string
+            example: sale
+        - name: taxonomy
+          in: query
+          required: false
+          description: Filter by taxonomy path (exact match, e.g. `clothing/tops`).
+          schema:
+            type: string
+            example: clothing/tops
         - name: min_price
           in: query
           required: false
@@ -1180,9 +1423,40 @@ paths:
         - name: stock_status
           in: query
           required: false
-          description: Filter by stock status. Defaults to excluding OOS variants.
+          description: Filter by stock status.
           schema:
             $ref: '#/components/schemas/StockStatus'
+      responses:
+        "200":
+          description: Search results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+
+  /catalog/search/v1/query:
+    post:
+      operationId: queryProducts
+      summary: Granular product search
+      description: |
+        Body-based search endpoint for clients that need structured filter logic
+        or multiple values per filter field. Accepts the same parameters as
+        `GET /catalog/search/v1` but as a JSON body.
+
+        Multiple values for the same filter field are OR-matched. Filters across
+        different fields are AND-matched.
+
+        Response schema is identical to `GET /catalog/search/v1`.
+      tags: [catalog/search]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchQueryRequest'
       responses:
         "200":
           description: Search results.

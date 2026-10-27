@@ -115,6 +115,7 @@ SELECT * FROM resolved;
 CREATE VIEW v_products_current AS
 SELECT
     p.id,
+    p.brand_id,
     p.status,
     p.version,
     p.created_at,
