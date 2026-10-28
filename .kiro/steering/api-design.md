@@ -30,8 +30,8 @@ Validation failures return `400 Bad Request` with the standard error shape:
 }
 ```
 
-## Command Query Separation (CQS)
-See `.kiro/steering/cqs.md` for the full principle, layer-by-layer rules, and rationale.
+## Command Query Responsibility Segregation (CQRS)
+See `.kiro/steering/cqrs.md` for the full principle, layer-by-layer rules, and rationale.
 
 - **Queries** (`GET`) return `200` with the full resource body (`data` + `meta` + `links`)
 - **Commands** (`POST`, `PUT`, `PATCH`, `DELETE`) return `202 Accepted` with a `CommandResponse` containing only `links` — no resource body

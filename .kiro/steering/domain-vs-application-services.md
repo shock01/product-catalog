@@ -53,7 +53,7 @@ None of that is business logic. It is coordination. The domain doesn't know abou
 Rules:
 - No HTTP types, no `net/http` imports
 - No SQL — delegates to repository interfaces defined in `domain`
-- Commands return only `error`; queries return a value and `error` (see `cqs.md`)
+- Commands return only `error`; queries return a value and `error` (see `cqrs.md`)
 - Owns transaction boundaries
 - Wraps all errors from external interfaces with `fmt.Errorf("context: %w", err)`
 

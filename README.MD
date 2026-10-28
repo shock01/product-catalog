@@ -47,7 +47,7 @@ A complete OpenAPI 3.1 spec at [`api/openapi.yaml`](api/openapi.yaml) covering t
 - `catalog/product` — CRUD backed by PostgreSQL (with Valkey cache)
 - `catalog/search` — read-only search backed by OpenSearch
 
-Commands return `202 Accepted` + HATEOAS links only (CQS). Queries return `200` + full resource. ETags are content-derived (SHA-256). 410 Gone is distinguished from 404 Not Found.
+Commands return `202 Accepted` + HATEOAS links only (CQRS). Queries return `200` + full resource. ETags are content-derived (SHA-256). 410 Gone is distinguished from 404 Not Found.
 
 ### Database schema
 Full PostgreSQL DDL in [`migrations/001_schema.sql`](migrations/001_schema.sql) with seed data in [`migrations/002_seed.sql`](migrations/002_seed.sql). Pricing schema in [`migrations/003_pricing.sql`](migrations/003_pricing.sql). Includes `snapshots` and `price_snapshot_imports` as write-guards, `price_snapshots` as an append-only price ledger, and `v_current_prices` / `v_products_current` as resolution views.
@@ -83,7 +83,7 @@ docker compose up
 Migrations run automatically via `dbmate` before the app services start.
 
 ### Kiro steering files
-`.kiro/steering/` contains ten steering documents that encode the design decisions as rules for AI-assisted development. They cover language and layout, data model, infrastructure, API design, operational patterns, diagramming standards, OpenAPI location, URL structure, testing standards, and CQS principles. Any AI assistant working on this codebase will pick these up automatically.
+`.kiro/steering/` contains ten steering documents that encode the design decisions as rules for AI-assisted development. They cover language and layout, data model, infrastructure, API design, operational patterns, diagramming standards, OpenAPI location, URL structure, testing standards, and CQRS principles. Any AI assistant working on this codebase will pick these up automatically.
 
 ### Skeleton Go code
 `internal/domain/`, `internal/repository/postgres/`, and `internal/app/` contain the domain entities, repository interface, and application service layer — enough to show the layering and the shape of the real implementation without pretending to be complete.
@@ -108,7 +108,7 @@ Migrations run automatically via `dbmate` before the app services start.
 
 **ECS Tasks triggered by EventBridge, not always-on consumers.** The importer and indexer only need to run when there is new data. EventBridge rules fire ECS Tasks on `s3:ObjectCreated` (importer) and `snapshot.imported` (indexer, one rule per channel×locale). No SQS queue, no visibility timeout tuning, no dead-letter queue management.
 
-**CQS on the API.** Mutating operations (POST, PUT, PATCH, DELETE) return `202 Accepted` with HATEOAS links only — no resource body. Queries (GET) return the full resource. This keeps the command and query paths cleanly separated and makes the API safe to retry.
+**CQRS on the API.** Mutating operations (POST, PUT, PATCH, DELETE) return `202 Accepted` with HATEOAS links only — no resource body. Queries (GET) return the full resource. This keeps the command and query paths cleanly separated and makes the API safe to retry.
 
 ---
 

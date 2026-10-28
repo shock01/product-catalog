@@ -53,7 +53,7 @@ func (h *ProductHandler) GetProduct(ctx context.Context, req gen.GetProductReque
 
 ## Use-Case Rules (`internal/usecase`)
 - Pure Go — no HTTP types, no `net/http` imports
-- Commands return only `error`; queries return a value and `error` (CQS — see `cqs.md`)
+- Commands return only `error`; queries return a value and `error` (CQRS — see `cqrs.md`)
 - Owns transaction boundaries and outbox dispatch
 - Depends on `domain` interfaces, not concrete repository types
 

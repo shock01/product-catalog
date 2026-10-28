@@ -960,14 +960,14 @@ components:
           description: Effective limit used for this response.
           example: 20
 
-    # -- Command response (CQS: commands return links only) -----------------
+    # -- Command response (CQRS: commands return links only) -----------------
 
     CommandResponse:
       type: object
       required: [links]
       description: |
         Returned by all mutating operations (POST, PUT, PATCH, DELETE).
-        Contains no resource data — only HATEOAS links (CQS principle).
+        Contains no resource data — only HATEOAS links (CQRS principle).
         Follow the `self` link to retrieve the updated resource.
       properties:
         links:
@@ -1229,7 +1229,7 @@ paths:
       description: |
         Replaces the entire Product aggregate. Requires `If-Match` containing
         the current ETag. Returns `412` if the ETag is stale.
-        Returns `202 Accepted` with links only (CQS — no resource body on commands).
+        Returns `202 Accepted` with links only (CQRS — no resource body on commands).
       tags: [catalog/product]
       security:
         - oauth2: [catalog:product:write]
@@ -1274,7 +1274,7 @@ paths:
       description: |
         Applies a partial mutation to the Product aggregate. Only provided
         fields are changed. Requires `If-Match`.
-        Returns `202 Accepted` with links only (CQS — no resource body on commands).
+        Returns `202 Accepted` with links only (CQRS — no resource body on commands).
       tags: [catalog/product]
       security:
         - oauth2: [catalog:product:write]
@@ -1319,7 +1319,7 @@ paths:
       description: |
         Marks the product as deleted. Retained in the database but removed
         from the OpenSearch index. Requires `If-Match`.
-        Returns `202 Accepted` with links only (CQS — no resource body on commands).
+        Returns `202 Accepted` with links only (CQRS — no resource body on commands).
       tags: [catalog/product]
       security:
         - oauth2: [catalog:product:write]

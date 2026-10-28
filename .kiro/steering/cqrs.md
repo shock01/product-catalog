@@ -1,4 +1,25 @@
-# Command Query Separation (CQS)
+# Command Query Responsibility Segregation (CQRS)
+
+## CQS vs CQRS — the distinction matters
+
+**CQS (Command Query Separation)** is a method-level principle coined by Bertrand Meyer. It states that every method should either:
+- **return a value** and not change state (a query), or
+- **change state** and return nothing (a command)
+
+This applies inside a single object or service. It is a coding discipline, not an architecture.
+
+**CQRS (Command Query Responsibility Segregation)** takes the same idea and applies it at the **application and infrastructure level**. Commands and queries are not just different method signatures — they are different models, different paths through the system, and potentially different data stores:
+
+- **Write path** (commands): client → API → PostgreSQL → outbox → EventBridge
+- **Read path** (queries): client → API → Valkey cache → PostgreSQL (single product) or OpenSearch (search/list)
+
+The two paths scale independently. The read store (OpenSearch) is a denormalised projection of the write store (PostgreSQL), kept in sync asynchronously via the indexer. This is the defining characteristic of CQRS — not just that methods are named differently, but that reads and writes are served by different infrastructure.
+
+In this codebase both levels apply:
+- **CQS at the code level**: command methods in `internal/app` return only `error`; query methods return a value and `error`
+- **CQRS at the infrastructure level**: PostgreSQL owns writes, OpenSearch owns search, Valkey caches reads — separate stores, separate scaling axes
+
+---
 
 ## Principle
 
@@ -12,7 +33,6 @@ Every operation is either a **query** or a **command** — never both.
 This is enforced at every layer: domain, application, and API.
 
 ---
-
 ## Application Layer (`internal/app`)
 
 - **Query methods** return a value and an error: `func (s *Service) GetProduct(ctx, id) (*domain.Product, error)`
